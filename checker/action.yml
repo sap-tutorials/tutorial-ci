@@ -7,7 +7,6 @@ inputs:
     required: true
   output:
     description: "Path to write the JSON findings array"
-    required: true
     default: "content.json"
 
 runs:
@@ -20,7 +19,7 @@ runs:
 
     - name: Install checker dependencies
       shell: bash
-      run: npm install --prefix "$GITHUB_ACTION_PATH" --ignore-scripts --no-fund --no-audit 2>/dev/null
+      run: npm install --prefix "$GITHUB_ACTION_PATH" --ignore-scripts --no-fund --no-audit 2>/dev/null || true
 
     - name: Run content checker
       shell: bash
