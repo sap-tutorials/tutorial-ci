@@ -11,13 +11,13 @@ describe("normalizeFindings", () => {
   test("maps gitleaks report entries to secret findings", () => {
     const gitleaks = [{ File: "b.md", StartLine: 5, RuleID: "github-pat", Description: "GitHub PAT" }];
     const out = normalizeFindings({ markdownlint: [], gitleaks, lychee: [] });
-    expect(out[0]).toMatchObject({ category: "secrets", file: "b.md", line: 5, rule: "github-pat", severity: "warning" });
+    expect(out[0]).toMatchObject({ category: "secrets", file: "b.md", line: 5, rule: "github-pat", severity: "warning", message: "GitHub PAT" });
   });
 
   test("maps lychee failures to notice-level link findings", () => {
     const lychee = { fail_map: { "c.md": [{ url: "https://dead.example", status: "404" }] } };
     const out = normalizeFindings({ markdownlint: [], gitleaks: [], lychee });
-    expect(out[0]).toMatchObject({ category: "links", file: "c.md", severity: "notice", message: expect.stringContaining("dead.example") });
+    expect(out[0]).toMatchObject({ category: "links", file: "c.md", severity: "notice", line: 0, rule: "broken-link", message: expect.stringContaining("dead.example") });
   });
 });
 
@@ -30,9 +30,13 @@ describe("renderAnnotations", () => {
 
 describe("renderComment", () => {
   test("groups by category with counts and a clean-state message", () => {
-    expect(renderComment([], { sha: "abc123" })).toContain("No issues found");
+    const empty = renderComment([], { sha: "abc123" });
+    expect(empty).toContain("No issues found");
+    expect(empty).toContain("<!-- tutorial-ci-findings -->");
     const c = renderComment([{ category: "secrets", file: "b.md", line: 5, severity: "warning", rule: "github-pat", message: "GitHub PAT" }], { sha: "abc123" });
     expect(c).toContain("### Secrets (1)");
     expect(c).toContain("b.md:5");
+    expect(c).toContain("notify-only, does not block merge");
+    expect(c).toContain("abc123");
   });
 });
