@@ -51,7 +51,7 @@ export function runChecks(markdown, filename, rules = allRules) {
     const partial = rule(ctx);
     if (Array.isArray(partial)) {
       for (const f of partial) {
-        findings.push({ category: "content", file: filename, ...f });
+        findings.push({ ...f, category: "content", file: filename });
       }
     }
   }

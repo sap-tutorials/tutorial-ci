@@ -3,7 +3,7 @@ import { runChecks } from "../index.js";
 
 test("runChecks returns [] for empty rule set on clean input", () => {
   const md = "---\ntitle: X\n---\n# X\n";
-  expect(runChecks(md, "tutorials/x/x.md")).toEqual([]);
+  expect(runChecks(md, "tutorials/x/x.md", [])).toEqual([]);
 });
 
 test("a registered rule receives parsed context and its findings carry file+category", () => {
