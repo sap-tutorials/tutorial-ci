@@ -33,25 +33,52 @@ jobs:
           echo "Changed markdown files:"
           cat changed.txt || echo "(none)"
 
-      # ── 3. Node.js for the normaliser + annotation scripts ─────────────────
+      # ── 3. Detect whether any markdown changed (skip linters if not) ─────────
+      - name: Check for changed markdown
+        id: md-changed
+        run: |
+          if [ -s changed.txt ]; then
+            echo "has_md=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_md=false" >> "$GITHUB_OUTPUT"
+            echo "No markdown files changed — skipping linters."
+          fi
+
+      # ── 4. Node.js for markdownlint-cli2, normaliser + annotation scripts ───
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      # ── 4. markdownlint-cli2 → ml.json ─────────────────────────────────────
-      #    Runs on all *.md; outputFormat/outputFile supported since action v16.
-      #    continue-on-error: workflow must not fail on lint findings.
+      # ── 5. markdownlint-cli2 → ml.json (changed files only) ─────────────────
+      #    xargs reads the newline-delimited paths from changed.txt and passes
+      #    them as explicit file args so only the PR's changed files are linted.
       - name: Run markdownlint-cli2
+        if: steps.md-changed.outputs.has_md == 'true'
         continue-on-error: true
-        uses: DavidAnson/markdownlint-cli2-action@v17
-        with:
-          config: config/markdownlint.yaml
-          globs: "**/*.md"
-          outputFormat: json
-          outputFile: ml.json
+        run: |
+          npx --yes markdownlint-cli2 \
+            --config config/markdownlint.yaml \
+            $(xargs -a changed.txt printf '%s ') \
+            2>&1 | tee ml-raw.txt || true
+          # Convert markdownlint-cli2 text output to the JSON array the normaliser
+          # expects: [{fileName, lineNumber, ruleNames, ruleDescription}]
+          node --input-type=module -e "
+          import { readFileSync } from 'node:fs';
+          const raw = readFileSync('ml-raw.txt', 'utf8');
+          const findings = [];
+          for (const line of raw.split('\n')) {
+            // format: path/file.md:10:3 MD009/trailing-spaces Trailing spaces [...]
+            const m = line.match(/^(.+?):(\d+)(?::\d+)? (MD\d+)[/\S]* (.+)$/);
+            if (m) findings.push({
+              fileName: m[1], lineNumber: Number(m[2]),
+              ruleNames: [m[3]], ruleDescription: m[4].split(' [')[0]
+            });
+          }
+          process.stdout.write(JSON.stringify(findings));
+          " > ml.json || echo '[]' > ml.json
 
-      # ── 5. gitleaks → gl.json ──────────────────────────────────────────────
+      # ── 6. gitleaks → gl.json (full-tree scan — correct security posture) ───
       #    Install pinned binary then run in no-git mode for a clean JSON report.
       - name: Install gitleaks
         run: |
@@ -71,18 +98,19 @@ jobs:
             --source . \
             || true
 
-      # ── 6. lychee link check → ly.json ─────────────────────────────────────
-      #    fail: false keeps the step green; our normaliser surfaces the issues.
+      # ── 7. lychee link check → ly.json (changed files only) ─────────────────
+      #    TODO(pilot): verify lychee-action tag before production rollout.
+      #    xargs passes the changed file paths directly to lychee so only links
+      #    in the PR's changed markdown are checked.
       - name: Run lychee link check
+        if: steps.md-changed.outputs.has_md == 'true'
         continue-on-error: true
-        uses: lycheeverse/lychee-action@v2
-        with:
-          args: >-
-            --config config/lychee.toml
-            --format json
-            --output ly.json
-            **/*.md
-          fail: false
+        run: |
+          xargs -a changed.txt lychee \
+            --config config/lychee.toml \
+            --format json \
+            --output ly.json \
+            || true
 
       # ── 7. Normalise tool outputs into unified findings.json ───────────────
       #    The CLI shim in normalize-findings.js reads the three JSON files

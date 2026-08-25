@@ -7,6 +7,11 @@
 import { readFileSync } from "node:fs";
 import { renderAnnotations } from "./normalize-findings.js";
 
-const findings = JSON.parse(readFileSync("findings.json", "utf8"));
+let findings = [];
+try {
+  findings = JSON.parse(readFileSync("findings.json", "utf8"));
+} catch {
+  // findings.json absent or malformed — treat as no findings, still exit 0
+}
 const out = renderAnnotations(findings);
 if (out) process.stdout.write(out + "\n");
