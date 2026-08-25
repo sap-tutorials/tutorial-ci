@@ -8,4 +8,5 @@ jobs:
     uses: sap-tutorials/tutorial-ci/.github/workflows/post-results.yml@v1
     permissions:
       actions: read
+      contents: read
     secrets: inherit
