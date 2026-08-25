@@ -1,0 +1,25 @@
+{
+  "name": "tutorial-ci",
+  "version": "1.0.0",
+  "description": "Central org-maintained PR content checks for SAP tutorial repos",
+  "main": "index.js",
+  "directories": {
+    "test": "test"
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sap-tutorials/tutorial-ci.git"
+  },
+  "keywords": [],
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/sap-tutorials/tutorial-ci/issues"
+  },
+  "homepage": "https://github.com/sap-tutorials/tutorial-ci#readme",
+  "devDependencies": {
+    "vitest": "4.1.11"
+  }
+}
