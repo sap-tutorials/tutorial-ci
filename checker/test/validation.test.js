@@ -27,3 +27,18 @@ test("unrecognized rule type warns", () => {
 test("AUTOAUTHOR with a bad suffix warns", () => {
   expect(check("[AUTOAUTHOR_2:essay]\n")).toContain("autoauthor-unknown-suffix");
 });
+
+test("fenced [VALIDATE_9] token with language-tagged opener is ignored", () => {
+  // The ```bash opener must NOT prematurely close the fence (old bug).
+  // [VALIDATE_9] is inside the fence — it must NOT be detected as a real block.
+  const md = "```bash\n[VALIDATE_9]\n###Question\nQ\n###Match\nfoo\n```\n";
+  expect(check(md)).not.toContain("validate-missing-question");
+  expect(check(md)).not.toContain("validate-missing-answer");
+  expect(check(md)).toEqual([]);
+});
+
+test("[VALIDATE_1] after a fenced block with a language-tagged opener is still detected", () => {
+  // After the fence closes, [VALIDATE_1] outside the fence must fire normally.
+  const md = "```bash\nsome code\n```\n[VALIDATE_1]\n###Rule\nregex\n###Match\nfoo\n";
+  expect(check(md)).toContain("validate-missing-question");
+});

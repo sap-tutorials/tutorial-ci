@@ -19,7 +19,10 @@ const KNOWN_AUTOAUTHOR_SUFFIXES = new Set(["mcq", "text"]);
 // Matches [VALIDATE_N] block openers (any positive integer)
 const VALIDATE_OPEN = /^\[VALIDATE_(\d+)\]\s*$/;
 
-// Matches [AUTOAUTHOR_N:suffix] or [AUTOAUTHOR_ALL:suffix] (suffix required)
+// Matches [AUTOAUTHOR_N], [AUTOAUTHOR_N:suffix], [AUTOAUTHOR_ALL], [AUTOAUTHOR_ALL:suffix]
+const AUTOAUTHOR_ANY = /^\[AUTOAUTHOR_(?:\d+|ALL)(?::[^\]]*)?\]\s*$/;
+
+// Matches [AUTOAUTHOR_N:suffix] or [AUTOAUTHOR_ALL:suffix] (suffix required — for suffix check)
 const AUTOAUTHOR_WITH_SUFFIX = /^\[AUTOAUTHOR_(?:\d+|ALL):([^\]]+)\]\s*$/;
 
 // Matches ###Rule, ###Question, ###Match, ###Grading section headers inside a block
@@ -41,6 +44,13 @@ function parseValidateBlocks(lines, fenced) {
       continue;
     }
     const line = lines[i];
+
+    // [AUTOAUTHOR_*] terminates the current block (same as next [VALIDATE_N])
+    if (AUTOAUTHOR_ANY.test(line)) {
+      current = null;
+      currentSection = null;
+      continue;
+    }
 
     if (VALIDATE_OPEN.test(line)) {
       // Start a new block
