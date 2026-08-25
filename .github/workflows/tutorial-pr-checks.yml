@@ -54,17 +54,26 @@ jobs:
       #    Uses markdownlint-cli2-formatter-json so ml.json is a true JSON array
       #    of {fileName, lineNumber, ruleNames, ruleDescription} objects that the
       #    normaliser consumes directly — no fragile text parsing.
-      #    Rules are inlined in the /tmp config so content-repo workspaces never
-      #    need config/markdownlint.yaml and their own .markdownlint-cli2.jsonc
-      #    is never clobbered. --config accepts full cli2 JSONC configs.
+      #    Rules are read from config/markdownlint.yaml (single source of truth);
+      #    the formatter is appended at runtime — no hand-maintained duplicate
+      #    ruleset. --config accepts full cli2 JSONC configs.
       - name: Run markdownlint-cli2
         if: steps.md-changed.outputs.has_md == 'true'
         continue-on-error: true
         run: |
           npm install --global markdownlint-cli2 markdownlint-cli2-formatter-json 2>/dev/null
-          # Write full cli2 config to /tmp: inlined rules + JSON formatter output
-          printf '{"default":true,"MD013":false,"MD033":false,"MD034":false,"MD041":false,"outputFormatters":[["markdownlint-cli2-formatter-json"]]}\n' \
-            > /tmp/ml-ci2.jsonc
+          # Build cli2 JSONC from config/markdownlint.yaml (single source of truth)
+          # then append the JSON formatter — no hand-maintained inline copy.
+          node -e "
+            const src = require('fs').readFileSync('config/markdownlint.yaml', 'utf8');
+            const rules = {};
+            for (const line of src.split('\n')) {
+              const m = line.match(/^(\w+):\s*(true|false)/);
+              if (m) rules[m[1]] = m[2] !== 'false';
+            }
+            rules.outputFormatters = [['markdownlint-cli2-formatter-json']];
+            require('fs').writeFileSync('/tmp/ml-ci2.jsonc', JSON.stringify(rules));
+          "
           # Run against changed files only; formatter writes markdownlint-cli2-results.json
           xargs -a changed.txt markdownlint-cli2 --config /tmp/ml-ci2.jsonc || true
           # Rename to ml.json; fall back to empty array if formatter produced nothing
@@ -91,18 +100,39 @@ jobs:
             || true
 
       # ── 7. lychee link check → ly.json (changed files only) ─────────────────
-      #    TODO(pilot): verify lychee-action tag before production rollout.
-      #    xargs passes the changed file paths directly to lychee so only links
-      #    in the PR's changed markdown are checked.
+      #    Uses lycheeverse/lychee-action@v2 so lychee is always available.
+      #    Changed files are passed via a step output (space-separated).
+      #    Output is transformed to the {fail_map} shape normalize-findings.js reads.
+      - name: Prepare lychee file list
+        id: lychee-files
+        if: steps.md-changed.outputs.has_md == 'true'
+        run: echo "files=$(tr '\n' ' ' < changed.txt)" >> "$GITHUB_OUTPUT"
+
       - name: Run lychee link check
         if: steps.md-changed.outputs.has_md == 'true'
         continue-on-error: true
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config config/lychee.toml --format json --output ly-raw.json ${{ steps.lychee-files.outputs.files }}
+
+      - name: Normalize lychee output to fail_map shape
+        if: steps.md-changed.outputs.has_md == 'true'
         run: |
-          xargs -a changed.txt lychee \
-            --config config/lychee.toml \
-            --format json \
-            --output ly.json \
-            || true
+          node -e "
+            const fs = require('fs');
+            let raw = {};
+            try { raw = JSON.parse(fs.readFileSync('ly-raw.json', 'utf8')); } catch {}
+            const failMap = raw.fail_map ?? {};
+            for (const entries of Object.values(failMap)) {
+              for (const e of entries) {
+                if (typeof e.status !== 'string')
+                  e.status = typeof e.status === 'object'
+                    ? (e.status.text ?? JSON.stringify(e.status))
+                    : String(e.status);
+              }
+            }
+            fs.writeFileSync('ly.json', JSON.stringify({ fail_map: failMap }));
+          " || echo '{}' > ly.json
 
       # ── 7b. Capture changed-file list as step output for composite action ────
       - name: Set changed-markdown output

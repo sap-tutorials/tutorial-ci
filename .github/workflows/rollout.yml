@@ -94,11 +94,11 @@ jobs:
               let checksExists = false;
               let commentExists = false;
               try {
-                const existingChecks = JSON.parse(execFileSync('gh', ['api', 'repos/' + repo + '/contents/.github/workflows/tutorial-pr-checks.yml', '--jq', '.content'], { encoding: 'utf8' }).trim().replace(/\\s/g, ''));
+                const existingChecks = execFileSync('gh', ['api', 'repos/' + repo + '/contents/.github/workflows/tutorial-pr-checks.yml', '--jq', '.content'], { encoding: 'utf8' }).trim().replace(/\\s/g, '');
                 if (existingChecks === checksContent) checksExists = true;
               } catch {}
               try {
-                const existingComment = JSON.parse(execFileSync('gh', ['api', 'repos/' + repo + '/contents/.github/workflows/tutorial-pr-comment.yml', '--jq', '.content'], { encoding: 'utf8' }).trim().replace(/\\s/g, ''));
+                const existingComment = execFileSync('gh', ['api', 'repos/' + repo + '/contents/.github/workflows/tutorial-pr-comment.yml', '--jq', '.content'], { encoding: 'utf8' }).trim().replace(/\\s/g, '');
                 if (existingComment === commentContent) commentExists = true;
               } catch {}
 
@@ -113,8 +113,7 @@ jobs:
               // Create the rollout branch from the repo default branch
               let defaultBranch = 'main';
               try {
-                const info = JSON.parse(execFileSync('gh', ['api', 'repos/' + repo, '--jq', '.default_branch'], { encoding: 'utf8' }).trim());
-                defaultBranch = info.replace(/\"/g, '');
+                defaultBranch = execFileSync('gh', ['api', 'repos/' + repo, '--jq', '.default_branch'], { encoding: 'utf8' }).trim();
               } catch {}
 
               // Get default branch SHA
@@ -138,7 +137,7 @@ jobs:
               const upsertFile = (filePath, content, message) => {
                 let existingSha = '';
                 try {
-                  existingSha = JSON.parse(execFileSync('gh', ['api', 'repos/' + repo + '/contents/' + filePath + '?ref=' + branch, '--jq', '.sha'], { encoding: 'utf8' }).trim().replace(/\\s/g,''));
+                  existingSha = execFileSync('gh', ['api', 'repos/' + repo + '/contents/' + filePath + '?ref=' + branch, '--jq', '.sha'], { encoding: 'utf8' }).trim();
                 } catch {}
                 const args = ['api', '-X', 'PUT', 'repos/' + repo + '/contents/' + filePath,
                   '-f', 'message=' + message,
