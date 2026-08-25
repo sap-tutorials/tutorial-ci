@@ -117,5 +117,5 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
           header: tutorial-ci
           number: ${{ steps.meta.outputs.pr_number }}
-          repo: ${{ steps.meta.outputs.repo }}
+          repo: ${{ steps.meta.outputs.repo_name }}
           path: comment.md
