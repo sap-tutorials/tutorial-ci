@@ -51,32 +51,24 @@ jobs:
           node-version: "20"
 
       # ── 5. markdownlint-cli2 → ml.json (changed files only) ─────────────────
-      #    xargs reads the newline-delimited paths from changed.txt and passes
-      #    them as explicit file args so only the PR's changed files are linted.
+      #    Uses markdownlint-cli2-formatter-json so ml.json is a true JSON array
+      #    of {fileName, lineNumber, ruleNames, ruleDescription} objects that the
+      #    normaliser consumes directly — no fragile text parsing.
+      #    Rules are inlined in the /tmp config so content-repo workspaces never
+      #    need config/markdownlint.yaml and their own .markdownlint-cli2.jsonc
+      #    is never clobbered. --config accepts full cli2 JSONC configs.
       - name: Run markdownlint-cli2
         if: steps.md-changed.outputs.has_md == 'true'
         continue-on-error: true
         run: |
-          npx --yes markdownlint-cli2 \
-            --config config/markdownlint.yaml \
-            $(xargs -a changed.txt printf '%s ') \
-            2>&1 | tee ml-raw.txt || true
-          # Convert markdownlint-cli2 text output to the JSON array the normaliser
-          # expects: [{fileName, lineNumber, ruleNames, ruleDescription}]
-          node --input-type=module -e "
-          import { readFileSync } from 'node:fs';
-          const raw = readFileSync('ml-raw.txt', 'utf8');
-          const findings = [];
-          for (const line of raw.split('\n')) {
-            // format: path/file.md:10:3 MD009/trailing-spaces Trailing spaces [...]
-            const m = line.match(/^(.+?):(\d+)(?::\d+)? (MD\d+)[/\S]* (.+)$/);
-            if (m) findings.push({
-              fileName: m[1], lineNumber: Number(m[2]),
-              ruleNames: [m[3]], ruleDescription: m[4].split(' [')[0]
-            });
-          }
-          process.stdout.write(JSON.stringify(findings));
-          " > ml.json || echo '[]' > ml.json
+          npm install --global markdownlint-cli2 markdownlint-cli2-formatter-json 2>/dev/null
+          # Write full cli2 config to /tmp: inlined rules + JSON formatter output
+          printf '{"default":true,"MD013":false,"MD033":false,"MD034":false,"MD041":false,"outputFormatters":[["markdownlint-cli2-formatter-json"]]}\n' \
+            > /tmp/ml-ci2.jsonc
+          # Run against changed files only; formatter writes markdownlint-cli2-results.json
+          xargs -a changed.txt markdownlint-cli2 --config /tmp/ml-ci2.jsonc || true
+          # Rename to ml.json; fall back to empty array if formatter produced nothing
+          mv markdownlint-cli2-results.json ml.json 2>/dev/null || echo '[]' > ml.json
 
       # ── 6. gitleaks → gl.json (full-tree scan — correct security posture) ───
       #    Install pinned binary then run in no-git mode for a clean JSON report.
