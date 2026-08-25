@@ -1,0 +1,9 @@
+{
+  "name": "tutorial-ci-checker",
+  "version": "1.0.0",
+  "description": "Content checker for SAP tutorial markdown",
+  "type": "module",
+  "dependencies": {
+    "gray-matter": "4.0.3"
+  }
+}

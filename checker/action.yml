@@ -1,0 +1,35 @@
+name: "Tutorial Content Checker"
+description: "Run content-structure checks on changed tutorial markdown files (notify-only, never fails the job)"
+
+inputs:
+  files:
+    description: "Newline-separated list of changed .md file paths to check"
+    required: true
+  output:
+    description: "Path to write the JSON findings array"
+    required: true
+    default: "content.json"
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "20"
+
+    - name: Install checker dependencies
+      shell: bash
+      run: npm install --prefix "$GITHUB_ACTION_PATH" --ignore-scripts --no-fund --no-audit 2>/dev/null
+
+    - name: Run content checker
+      shell: bash
+      env:
+        CHECKER_FILES: ${{ inputs.files }}
+        CHECKER_OUTPUT: ${{ inputs.output }}
+      run: |
+        if [ -n "$CHECKER_FILES" ]; then
+          node "$GITHUB_ACTION_PATH/cli.js" "$CHECKER_FILES" > "$CHECKER_OUTPUT" || true
+        else
+          echo '[]' > "$CHECKER_OUTPUT"
+        fi

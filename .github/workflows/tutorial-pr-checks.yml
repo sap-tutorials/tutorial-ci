@@ -104,14 +104,33 @@ jobs:
             --output ly.json \
             || true
 
+      # ── 7b. Capture changed-file list as step output for composite action ────
+      - name: Set changed-markdown output
+        id: changed-md-list
+        if: steps.md-changed.outputs.has_md == 'true'
+        run: |
+          {
+            echo 'files<<EOF'
+            cat changed.txt
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # ── 7c. Content checker → content.json (changed files only) ──────────────
+      - name: Run content checker
+        if: steps.md-changed.outputs.has_md == 'true'
+        uses: sap-tutorials/tutorial-ci/checker@v1
+        with:
+          files: ${{ steps.changed-md-list.outputs.files }}
+          output: content.json
+
       # ── 7. Normalise tool outputs into unified findings.json ───────────────
-      #    The CLI shim in normalize-findings.js reads the three JSON files
+      #    The CLI shim in normalize-findings.js reads the four JSON files
       #    (falls back to empty arrays/object on missing/invalid JSON) and
       #    prints a single findings array to stdout.
       - name: Normalize findings
         if: always()
         run: |
-          node scripts/normalize-findings.js ml.json gl.json ly.json > findings.json
+          node scripts/normalize-findings.js ml.json gl.json ly.json content.json > findings.json
 
       # ── 8. Emit GitHub workflow annotations ────────────────────────────────
       #    Reads findings.json and prints ::warning:: / ::notice:: commands.

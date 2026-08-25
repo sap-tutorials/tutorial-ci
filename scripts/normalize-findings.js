@@ -11,7 +11,7 @@ import path from "node:path";
  * @param {{ markdownlint: any[], gitleaks: any[], lychee: any }} inputs
  * @returns {Finding[]}
  */
-export function normalizeFindings({ markdownlint = [], gitleaks = [], lychee = {} }) {
+export function normalizeFindings({ markdownlint = [], gitleaks = [], lychee = {}, content = [] }) {
   const findings = [];
 
   // markdownlint-cli2 JSON output: array of { fileName, lineNumber, ruleNames, ruleDescription, ... }
@@ -51,6 +51,11 @@ export function normalizeFindings({ markdownlint = [], gitleaks = [], lychee = {
         message: `${failure.url} — ${failure.status}`,
       });
     }
+  }
+
+  // Pre-normalized content findings — pass through unchanged
+  for (const f of content) {
+    findings.push(f);
   }
 
   return findings;
@@ -106,7 +111,7 @@ export function renderComment(findings, { sha }) {
 
 // CLI shim — only runs when invoked directly, not when imported as a module
 if (path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [, , mlPath, glPath, lyPath] = process.argv;
+  const [, , mlPath, glPath, lyPath, contentPath] = process.argv;
 
   const readJson = (p) => {
     try {
@@ -120,6 +125,7 @@ if (path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const markdownlint = readJson(mlPath) ?? [];
   const gitleaks = readJson(glPath) ?? [];
   const lycheeRaw = readJson(lyPath) ?? {};
+  const content = readJson(contentPath) ?? [];
 
-  console.log(JSON.stringify(normalizeFindings({ markdownlint, gitleaks, lychee: lycheeRaw })));
+  console.log(JSON.stringify(normalizeFindings({ markdownlint, gitleaks, lychee: lycheeRaw, content })));
 }

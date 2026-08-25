@@ -19,6 +19,12 @@ describe("normalizeFindings", () => {
     const out = normalizeFindings({ markdownlint: [], gitleaks: [], lychee });
     expect(out[0]).toMatchObject({ category: "links", file: "c.md", severity: "notice", line: 0, rule: "broken-link", message: expect.stringContaining("dead.example") });
   });
+
+  test("pre-normalized content findings pass through unchanged", () => {
+    const content = [{ category: "content", file: "x.md", line: 1, severity: "warning", rule: "body-no-steps", message: "no steps" }];
+    const out = normalizeFindings({ markdownlint: [], gitleaks: [], lychee: [], content });
+    expect(out).toContainEqual(content[0]);
+  });
 });
 
 describe("renderAnnotations", () => {
