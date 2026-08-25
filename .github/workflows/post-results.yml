@@ -22,10 +22,12 @@ name: Post Tutorial CI Results
 on:
   workflow_call:
 
-# GITHUB_TOKEN only needs actions:read to download the workflow_run artifact.
+# GITHUB_TOKEN needs actions:read to download the workflow_run artifact and
+# contents:read to checkout tutorial-ci's (public) normaliser script.
 # Write access to the cross-repo PR comment comes from the App token (step 3).
 permissions:
   actions: read
+  contents: read
 
 jobs:
   post-comment:
@@ -78,6 +80,8 @@ jobs:
       - name: Checkout tutorial-ci scripts
         uses: actions/checkout@v4
         with:
+          repository: sap-tutorials/tutorial-ci
+          ref: v1
           sparse-checkout: |
             scripts/normalize-findings.js
             package.json
