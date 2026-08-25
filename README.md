@@ -16,7 +16,10 @@ sticky summary comment, and never block a merge.
 
 ## Adopting it in a repo
 
-Add this ~10-line caller as `.github/workflows/tutorial-pr-checks.yml`:
+Each content repo installs **two** ~10-line caller workflows (both pinned to the
+moving `@v1` tag, so central updates propagate with no per-repo edits):
+
+`.github/workflows/tutorial-pr-checks.yml` (runs the checks on the PR):
 
 ```yaml
 name: Tutorial PR Checks
@@ -31,9 +34,50 @@ jobs:
     secrets: inherit
 ```
 
-Pinned to the moving `@v1` tag — central updates propagate automatically with no
-per-repo edits. New repos inherit it from the tutorial templates; existing repos
-receive it via the `rollout.yml` fan-out.
+`.github/workflows/tutorial-pr-comment.yml` (posts the sticky comment; the
+`workflow_run` split keeps fork PRs fork-safe):
+
+```yaml
+name: Tutorial PR Comment
+on:
+  workflow_run:
+    workflows: ["Tutorial PR Checks"]
+    types: [completed]
+jobs:
+  comment:
+    uses: sap-tutorials/tutorial-ci/.github/workflows/post-results.yml@v1
+    permissions:
+      actions: read
+      contents: read
+    secrets: inherit
+```
+
+New repos inherit both from the tutorial templates; existing repos receive them
+via the `rollout.yml` fan-out (auto-detects repos containing a `tutorials/`
+directory; tooling/templates excluded).
+
+## Setup prerequisites (one-time, org/host)
+
+These are required for the cross-repo pipeline to work and were each discovered
+the hard way during the first pilot — change any and the pipeline silently degrades:
+
+1. **`tutorial-ci` must be PUBLIC.** Consumer repos (public sources, private
+   `-Contribution` repos, and fork PRs with no secrets) all check out this repo's
+   `config/` + `scripts/` at runtime; only a public repo is readable by all of
+   them without a token. (It holds no secrets — only workflow logic + gitleaks
+   detection patterns.)
+2. **GitHub App `sap-tutorials-builder`** (`TUTORIALS_APP_ID` /
+   `TUTORIALS_APP_PRIVATE_KEY`, org secrets, visibility *all*) must have
+   **`contents`, `pull_requests`, `issues`, and `workflows` write**. The comment
+   poster and `rollout.yml` mint tokens from it.
+3. **Org Actions policy** must allow third-party marketplace actions
+   (`allowed_actions: all`, or allowlist `actions/*`, `lycheeverse/lychee-action`,
+   `DavidAnson/markdownlint-cli2-action`, `marocchino/sticky-pull-request-comment`,
+   `gitleaks`).
+
+Everything is **notify-only**: every workflow exits 0, findings are
+`warning`/`notice` annotations plus a sticky comment, and no check is a required
+gate — merges are never blocked.
 
 ## Layout
 
@@ -43,4 +87,4 @@ receive it via the `rollout.yml` fan-out.
 - `config/` — shared markdownlint / gitleaks / lychee configs
 - `scripts/` — findings normalizer, repo enumeration
 - `checker/` — SAP content checker (composite action)
-- `caller-template/` — the caller file synced into each repo
+- `caller-template/` — the two caller files (checks + comment) synced into each repo
