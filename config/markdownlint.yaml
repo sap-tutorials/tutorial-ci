@@ -1,0 +1,5 @@
+default: true
+MD013: false   # line length — tutorials have long lines
+MD033: false   # inline HTML allowed in tutorial steps
+MD034: false   # bare URLs handled by link check, not markdownlint
+MD041: false   # first-line-heading — YAML frontmatter precedes headings

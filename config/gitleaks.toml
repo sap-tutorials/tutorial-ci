@@ -1,0 +1,20 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "sap-btp-service-key"
+description = "BTP service key / VCAP credentials blob"
+regex = '''(?i)"(clientsecret|client_secret)"\s*:\s*"[^"]{12,}"'''
+tags = ["sap", "btp"]
+
+[[rules]]
+id = "sap-default-env"
+description = "default-env.json committed with credentials"
+path = '''(?i)default-env\.json$'''
+tags = ["sap", "btp"]
+
+[[rules]]
+id = "github-pat"
+description = "GitHub PAT"
+regex = '''gh[pousr]_[A-Za-z0-9]{36,}'''
+tags = ["github"]
