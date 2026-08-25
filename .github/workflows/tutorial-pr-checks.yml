@@ -86,8 +86,10 @@ jobs:
               const m = line.match(/^(\w+):\s*(true|false)/);
               if (m) rules[m[1]] = m[2] !== 'false';
             }
-            rules.outputFormatters = [['markdownlint-cli2-formatter-json']];
-            require('fs').writeFileSync('/tmp/ml-ci2.jsonc', JSON.stringify(rules));
+            // markdownlint-cli2 requires rule toggles under a 'config' key;
+            // top-level rule keys are ignored (this was silently dropping every disable).
+            const cfg = { config: rules, outputFormatters: [['markdownlint-cli2-formatter-json']] };
+            require('fs').writeFileSync('/tmp/ml-ci2.jsonc', JSON.stringify(cfg));
           "
           # Run against changed files only; formatter writes markdownlint-cli2-results.json
           xargs -a changed.txt markdownlint-cli2 --config /tmp/ml-ci2.jsonc || true
