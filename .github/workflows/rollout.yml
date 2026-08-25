@@ -64,10 +64,12 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ONLY: ${{ inputs.only }}
         run: |
-          BRANCH="ci/adopt-tutorial-pr-checks"
+          # Must be `export`ed so the `node -e` child process sees them via process.env
+          # (ONLY is provided via the env: block above; these are computed at runtime).
+          export BRANCH="ci/adopt-tutorial-pr-checks"
 
-          CHECKS_CONTENT=$(base64 -w0 caller-template/tutorial-pr-checks.yml)
-          COMMENT_CONTENT=$(base64 -w0 caller-template/tutorial-pr-comment.yml)
+          export CHECKS_CONTENT=$(base64 -w0 caller-template/tutorial-pr-checks.yml)
+          export COMMENT_CONTENT=$(base64 -w0 caller-template/tutorial-pr-comment.yml)
 
           node -e "
             const fs = require('fs');
