@@ -57,6 +57,29 @@ EXIT=0  (no schema errors)
 
 **Validation after fix:** `@action-validator/cli` exit 0, no schema errors.
 
+## Fix round 2 (post-review, commit 0a64cb9)
+
+**Problem:** markdownlint step was regex-parsing CLI text output into ml.json — fragile and liable to silently break if markdownlint-cli2 changes its output format.
+
+**Fix:** Replaced with `markdownlint-cli2-formatter-json` native JSON output:
+- `npm install --global markdownlint-cli2 markdownlint-cli2-formatter-json`
+- Full cli2 config (inlined rules + `outputFormatters`) written to `/tmp/ml-ci2.jsonc` — keeps content-repo workspaces clean (no `.markdownlint-cli2.jsonc` clobbered, no `config/markdownlint.yaml` required)
+- `--config` flag accepts full cli2 JSONC configs including `outputFormatters` (confirmed locally)
+- `xargs -a changed.txt markdownlint-cli2 --config /tmp/ml-ci2.jsonc` → formatter writes `markdownlint-cli2-results.json` → `mv` to `ml.json`
+- Fall back to `echo '[]' > ml.json` if formatter produced nothing
+
+**Local normalizer sanity (bad-markdown.md → normalizer):**
+```
+[{"category":"markdown","file":"test/fixtures/bad-markdown.md","line":6,"severity":"warning","rule":"MD009","message":"Trailing spaces"},
+ {"category":"markdown","file":"test/fixtures/bad-markdown.md","line":6,"severity":"warning","rule":"MD022","message":"Headings should be surrounded by blank lines"},
+ {"category":"markdown","file":"test/fixtures/bad-markdown.md","line":8,"severity":"warning","rule":"MD022","message":"Headings should be surrounded by blank lines"},
+ {"category":"markdown","file":"test/fixtures/bad-markdown.md","line":8,"severity":"warning","rule":"MD022","message":"Headings should be surrounded by blank lines"},
+ {"category":"markdown","file":"test/fixtures/bad-markdown.md","line":11,"severity":"warning","rule":"MD009","message":"Trailing spaces"}]
+```
+5 `category:"markdown"` findings confirmed — field names match normalizer contract exactly.
+
+**Validation after fix:** `@action-validator/cli` exit 0, no schema errors.
+
 ## Concerns
 
 - The `lycheeverse/lychee-action@v2` major-version tag (`@v2`) should be verified against the repo's actual release tags before live deployment; if only patch tags exist (e.g. `@v2.0.0`) the tag reference may need updating.
