@@ -29,6 +29,7 @@ jobs:
       #    Uses path:_ci so the consumer repo at workspace root is untouched.
       #    ref:v1 pins to the stable release tag — same repo that hosts this file.
       - name: Checkout tutorial-ci config + scripts
+        continue-on-error: true
         uses: actions/checkout@v4
         with:
           repository: sap-tutorials/tutorial-ci
