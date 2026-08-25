@@ -114,7 +114,7 @@ jobs:
       - name: Post sticky comment
         uses: marocchino/sticky-pull-request-comment@v2
         with:
-          token: ${{ steps.app-token.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           header: tutorial-ci
           number: ${{ steps.meta.outputs.pr_number }}
           repo: ${{ steps.meta.outputs.repo_name }}
