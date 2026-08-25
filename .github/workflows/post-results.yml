@@ -1,0 +1,111 @@
+# Trusted comment-poster workflow — runs in the tutorial-ci repo context
+# (base repo, default branch) so org secrets and the GitHub App token ARE
+# available here, even when the triggering PR came from a fork.
+#
+# Triggered by: workflow_run completion of any workflow named
+#   "Tutorial PR Checks" (the caller that content repos install).
+# Downloads the findings artifact from that run, mints an App token scoped
+# to the source content repo, and posts/updates a sticky PR comment.
+# This workflow itself never touches the PR merge-ability — notify only.
+
+name: Post Tutorial CI Results
+
+on:
+  workflow_run:
+    workflows: ["Tutorial PR Checks"]
+    types: [completed]
+
+# GITHUB_TOKEN only needs actions:read to download the workflow_run artifact.
+# Write access to the cross-repo PR comment comes from the App token (step 3),
+# obtained without any GITHUB_TOKEN write-to-PR permission.
+permissions:
+  actions: read
+
+jobs:
+  post-comment:
+    runs-on: ubuntu-latest
+    # Guard: skip non-PR workflow runs (e.g. push events on the calling repo).
+    if: github.event.workflow_run.event == 'pull_request'
+
+    steps:
+      # ── 1. Download findings + pr-meta artifact from the triggering run ──────
+      - name: Download tutorial-ci-findings artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tutorial-ci-findings
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── 2. Parse pr-meta.json into step outputs ──────────────────────────────
+      #    Shape (written by tutorial-pr-checks.yml step 9):
+      #      { pr_number, head_sha, base_sha, repo }
+      #    where repo = "owner/name".
+      #    repo_name is the bare name used by create-github-app-token's
+      #    `repositories` input (takes only the short name, not owner/name).
+      - name: Read pr-meta.json
+        id: meta
+        run: |
+          echo "pr_number=$(jq -r '.pr_number'                  pr-meta.json)" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(jq  -r '.head_sha'                   pr-meta.json)" >> "$GITHUB_OUTPUT"
+          echo "repo=$(jq      -r '.repo'                       pr-meta.json)" >> "$GITHUB_OUTPUT"
+          echo "repo_name=$(jq -r '.repo | split("/") | last'   pr-meta.json)" >> "$GITHUB_OUTPUT"
+
+      # ── 3. Mint an App token scoped to the source content repo ───────────────
+      #    Secrets are available here because workflow_run runs in the base-repo
+      #    (tutorial-ci) context — they are NOT exposed in the fork's
+      #    pull_request run.  The token is scoped to the single content repo
+      #    so blast radius is minimal.
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.TUTORIALS_APP_ID }}
+          private-key: ${{ secrets.TUTORIALS_APP_PRIVATE_KEY }}
+          owner: sap-tutorials
+          repositories: ${{ steps.meta.outputs.repo_name }}
+
+      # ── 4. Sparse-checkout the normaliser script into a subdirectory ─────────
+      #    Uses path:_ci so the artifact files already in the workspace root
+      #    (findings.json, pr-meta.json) are not clobbered.
+      #    package.json is included so Node resolves the ESM module type from
+      #    tutorial-ci's package.json when we dynamic-import normalize-findings.
+      - name: Checkout tutorial-ci scripts
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/normalize-findings.js
+            package.json
+          sparse-checkout-cone-mode: false
+          path: _ci
+
+      # ── 5. Render the sticky comment body ────────────────────────────────────
+      #    Dynamic import (await import()) is used so the ESM renderComment
+      #    export loads correctly from a node -e (CJS eval) entry point.
+      #    _ci/package.json declares "type":"module", which Node uses to
+      #    resolve the imported file as ESM.
+      - name: Build comment.md
+        run: |
+          node - <<'NODESCRIPT'
+          (async () => {
+            const fs = require('fs');
+            const { renderComment } = await import('./_ci/scripts/normalize-findings.js');
+            const findings = JSON.parse(fs.readFileSync('findings.json', 'utf8'));
+            const meta    = JSON.parse(fs.readFileSync('pr-meta.json',   'utf8'));
+            fs.writeFileSync('comment.md', renderComment(findings, { sha: meta.head_sha }));
+          })().catch(e => { console.error(e); process.exit(1); });
+          NODESCRIPT
+
+      # ── 6. Post or update the sticky comment on the source PR ────────────────
+      #    marocchino/sticky-pull-request-comment rewrites the single comment
+      #    keyed on `header: tutorial-ci` each run — repeated pushes update
+      #    rather than accumulate duplicate comments.
+      #    `repo` + `number` target the content repo's PR (not tutorial-ci).
+      #    `token` is the App token, which carries write access to that repo.
+      - name: Post sticky comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          header: tutorial-ci
+          number: ${{ steps.meta.outputs.pr_number }}
+          repo: ${{ steps.meta.outputs.repo }}
+          path: comment.md
