@@ -1,0 +1,215 @@
+name: Rollout — Install PR Checks Callers
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — report targets only, do not open PRs"
+        type: boolean
+        default: true
+      only:
+        description: "CSV allowlist of repo names to process (leave empty for all targets)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  rollout:
+    name: Fan-out rollout
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tutorial-ci
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Mint GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.TUTORIALS_APP_ID }}
+          private-key: ${{ secrets.TUTORIALS_APP_PRIVATE_KEY }}
+          owner: sap-tutorials
+
+      - name: Enumerate target repos
+        id: targets
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          node scripts/list-target-repos.js --dry-run 2>&1 | tee /tmp/targets-log.txt
+          # Also capture the JSON list for downstream steps
+          node scripts/list-target-repos.js > /tmp/targets.json
+          echo "count=$(node -e "const t=require('/tmp/targets.json'); console.log(JSON.parse(require('fs').readFileSync('/tmp/targets.json','utf8')).length)")" >> "$GITHUB_OUTPUT"
+
+      - name: Report targets (scheduled/dry-run)
+        if: ${{ github.event_name == 'schedule' || inputs.dry_run == true }}
+        run: |
+          echo "## Rollout dry-run summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Repos currently referencing \`saptutorials/tutorial-checker\` orb:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          node -e "
+            const repos = JSON.parse(require('fs').readFileSync('/tmp/targets.json','utf8'));
+            repos.forEach(r => console.log('- ' + r));
+            console.log('\n**Total:** ' + repos.length + ' repo(s)');
+          " >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open rollout PRs
+        if: ${{ github.event_name != 'schedule' && inputs.dry_run != true }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          ONLY="${{ inputs.only }}"
+          BRANCH="ci/adopt-tutorial-pr-checks"
+
+          CHECKS_CONTENT=$(base64 -w0 caller-template/tutorial-pr-checks.yml)
+          COMMENT_CONTENT=$(base64 -w0 caller-template/tutorial-pr-comment.yml)
+
+          node -e "
+            const fs = require('fs');
+            const { execFileSync } = require('child_process');
+
+            const repos = JSON.parse(fs.readFileSync('/tmp/targets.json', 'utf8'));
+            const only = process.env.ONLY ? process.env.ONLY.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+            const checksContent = process.env.CHECKS_CONTENT;
+            const commentContent = process.env.COMMENT_CONTENT;
+            const branch = process.env.BRANCH;
+
+            let opened = 0;
+            let skipped = 0;
+
+            for (const repo of repos) {
+              const repoName = repo.replace('sap-tutorials/', '');
+              if (only.length > 0 && !only.includes(repoName) && !only.includes(repo)) {
+                console.log('Skipping (not in allowlist): ' + repo);
+                continue;
+              }
+
+              // Idempotency: check if both callers already exist and are identical
+              let checksExists = false;
+              let commentExists = false;
+              try {
+                const existingChecks = JSON.parse(execFileSync('gh', ['api', 'repos/' + repo + '/contents/.github/workflows/tutorial-pr-checks.yml', '--jq', '.content'], { encoding: 'utf8' }).trim().replace(/\\s/g, ''));
+                if (existingChecks === checksContent) checksExists = true;
+              } catch {}
+              try {
+                const existingComment = JSON.parse(execFileSync('gh', ['api', 'repos/' + repo + '/contents/.github/workflows/tutorial-pr-comment.yml', '--jq', '.content'], { encoding: 'utf8' }).trim().replace(/\\s/g, ''));
+                if (existingComment === commentContent) commentExists = true;
+              } catch {}
+
+              if (checksExists && commentExists) {
+                console.log('Skipping (both callers already present and identical): ' + repo);
+                skipped++;
+                continue;
+              }
+
+              console.log('Processing: ' + repo);
+
+              // Create the rollout branch from the repo default branch
+              let defaultBranch = 'main';
+              try {
+                const info = JSON.parse(execFileSync('gh', ['api', 'repos/' + repo, '--jq', '.default_branch'], { encoding: 'utf8' }).trim());
+                defaultBranch = info.replace(/\"/g, '');
+              } catch {}
+
+              // Get default branch SHA
+              let sha = '';
+              try {
+                sha = execFileSync('gh', ['api', 'repos/' + repo + '/git/ref/heads/' + defaultBranch, '--jq', '.object.sha'], { encoding: 'utf8' }).trim().replace(/\"/g, '');
+              } catch {
+                console.error('Failed to get SHA for ' + repo + ', skipping.');
+                continue;
+              }
+
+              // Create branch (ignore error if already exists)
+              try {
+                execFileSync('gh', ['api', '-X', 'POST', 'repos/' + repo + '/git/refs',
+                  '-f', 'ref=refs/heads/' + branch,
+                  '-f', 'sha=' + sha
+                ], { encoding: 'utf8' });
+              } catch {}
+
+              // Upsert tutorial-pr-checks.yml caller
+              const upsertFile = (path, content, message) => {
+                let existingSha = '';
+                try {
+                  existingSha = JSON.parse(execFileSync('gh', ['api', 'repos/' + repo + '/contents/' + path + '?ref=' + branch, '--jq', '.sha'], { encoding: 'utf8' }).trim().replace(/\\s/g,''));
+                } catch {}
+                const args = ['api', '-X', 'PUT', 'repos/' + repo + '/contents/' + path,
+                  '-f', 'message=' + message,
+                  '-f', 'content=' + content,
+                  '-f', 'branch=' + branch
+                ];
+                if (existingSha) args.push('-f', 'sha=' + existingSha);
+                try {
+                  execFileSync('gh', args, { encoding: 'utf8' });
+                } catch (e) {
+                  console.error('Failed to upsert ' + path + ' on ' + repo + ': ' + e.message);
+                }
+              };
+
+              upsertFile('.github/workflows/tutorial-pr-checks.yml', checksContent,
+                'ci: add Tutorial PR Checks caller (central checks)');
+              upsertFile('.github/workflows/tutorial-pr-comment.yml', commentContent,
+                'ci: add Tutorial PR Comment caller (sticky comment)');
+
+              // Remove .circleci/ directory — delete config.yml if present
+              let circleciSha = '';
+              try {
+                circleciSha = JSON.parse(execFileSync('gh', ['api', 'repos/' + repo + '/contents/.circleci/config.yml?ref=' + branch, '--jq', '.sha'], { encoding: 'utf8' }).trim().replace(/\\s/g,''));
+              } catch {}
+              if (circleciSha) {
+                try {
+                  execFileSync('gh', ['api', '-X', 'DELETE', 'repos/' + repo + '/contents/.circleci/config.yml',
+                    '-f', 'message=ci: remove CircleCI config (migrated to GitHub Actions)',
+                    '-f', 'sha=' + circleciSha,
+                    '-f', 'branch=' + branch
+                  ], { encoding: 'utf8' });
+                } catch (e) {
+                  console.error('Failed to delete .circleci/config.yml on ' + repo + ': ' + e.message);
+                }
+              }
+
+              // Open PR (ignore error if PR already exists)
+              try {
+                const prResult = execFileSync('gh', ['pr', 'create',
+                  '--repo', repo,
+                  '--head', branch,
+                  '--base', defaultBranch,
+                  '--title', 'ci: adopt central Tutorial PR Checks, remove CircleCI',
+                  '--body', [
+                    '## Summary',
+                    '',
+                    'This PR installs the central org-maintained PR content checks:',
+                    '',
+                    '- Adds `.github/workflows/tutorial-pr-checks.yml` — runs markdownlint, link check, gitleaks on PRs (notify-only, never blocks merge)',
+                    '- Adds `.github/workflows/tutorial-pr-comment.yml` — posts sticky PR comment via the SAP Tutorials GitHub App',
+                    '- Removes `.circleci/config.yml` — CircleCI is replaced by the central GitHub Actions pipeline',
+                    '',
+                    'Both callers delegate to `sap-tutorials/tutorial-ci` at `@v1`. Central non-breaking changes propagate with no per-repo edits.',
+                    '',
+                    '_Generated by the rollout workflow in `sap-tutorials/tutorial-ci`._'
+                  ].join('\\n')
+                ], { encoding: 'utf8' });
+                console.log('Opened PR on ' + repo + ': ' + prResult.trim());
+                opened++;
+              } catch (e) {
+                if (e.message.includes('already exists')) {
+                  console.log('PR already exists on ' + repo + ', skipping.');
+                  skipped++;
+                } else {
+                  console.error('Failed to open PR on ' + repo + ': ' + e.message);
+                }
+              }
+            }
+
+            console.log('\\nDone. Opened: ' + opened + ', Skipped: ' + skipped);
+          " ONLY="$ONLY" CHECKS_CONTENT="$CHECKS_CONTENT" COMMENT_CONTENT="$COMMENT_CONTENT" BRANCH="$BRANCH"
