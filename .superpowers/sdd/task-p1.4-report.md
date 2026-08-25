@@ -40,6 +40,23 @@ EXIT=0  (no schema errors)
 
 4. **`markdownlint-cli2-action@v17` `outputFormat`/`outputFile` inputs.** Added as-is; these inputs were introduced in action v16. If the installed action version predates them, the inputs are silently ignored and `ml.json` won't be generated; the normalizer's `readJson` guard returns `null → []` so findings.json is still produced (just without markdown findings). No workflow failure either way.
 
+## Fix round (post-review, commit 26c7885)
+
+**IMPORTANT — changed-files scoping:**
+- Added `Check for changed markdown` step (id `md-changed`) that sets `has_md` output from `changed.txt`.
+- Replaced `DavidAnson/markdownlint-cli2-action` with a `run:` step: `npx markdownlint-cli2` fed via `xargs -a changed.txt`, output converted to JSON array via inline Node; steps gated on `steps.md-changed.outputs.has_md == 'true'`.
+- Replaced `lycheeverse/lychee-action` with a `run:` step: `xargs -a changed.txt lychee --format json --output ly.json`; same `has_md` gate.
+- Both linters are skipped entirely (not fallback-scanned) when no markdown changed.
+- gitleaks full-tree scan unchanged.
+
+**MINOR — emit-annotations.js hardening:**
+- Wrapped `readFileSync` + `JSON.parse` in `try/catch`; missing or malformed `findings.json` now produces empty findings and a clean exit instead of a red step.
+
+**DEFER:**
+- Added `# TODO(pilot): verify lychee-action tag` comment on the lychee step (lychee is now a `run:` step that calls the binary directly, so the action tag is no longer referenced; the comment flags that lychee binary availability needs verification during pilot).
+
+**Validation after fix:** `@action-validator/cli` exit 0, no schema errors.
+
 ## Concerns
 
 - The `lycheeverse/lychee-action@v2` major-version tag (`@v2`) should be verified against the repo's actual release tags before live deployment; if only patch tags exist (e.g. `@v2.0.0`) the tag reference may need updating.
