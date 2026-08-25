@@ -31,8 +31,11 @@ export const EXCLUDED_REPOS = new Set([
 ]);
 
 /**
- * A repo is a tutorial content repo (rollout target) iff it has a top-level
- * `tutorials/` directory and is not in the tooling/template exclude set.
+ * A repo is a tutorial content repo (rollout target) iff it is NOT excluded AND
+ * either (a) has a top-level `tutorials/` directory, OR (b) still references the
+ * tutorial-checker CircleCI orb. The union covers both repos already cleaned of
+ * CircleCI (have `tutorials/`) and content repos that are currently empty of a
+ * tutorials/ dir but were set up for tutorial checking (e.g. ai-core).
  * @param {string} repoName bare name (no owner)
  * @returns {boolean}
  */
@@ -41,6 +44,33 @@ export function hasTutorialsDir(repoName) {
   const res = ghApi(`repos/sap-tutorials/${repoName}/contents/tutorials`, ["--jq", "type"]);
   // A directory listing returns a JSON array; `--jq type` prints "array".
   return res !== null && res.trim() === "array";
+}
+
+/**
+ * True iff the repo still has a `.circleci/config.yml` referencing the tutorial-checker orb.
+ * @param {string} repoName bare name (no owner)
+ * @returns {boolean}
+ */
+export function hasOrbReference(repoName) {
+  const res = ghApi(`repos/sap-tutorials/${repoName}/contents/.circleci/config.yml`, ["--jq", ".content"]);
+  if (!res) return false;
+  const b64 = res.trim();
+  if (!b64 || b64 === "null") return false;
+  try {
+    return isTargetRepo(Buffer.from(b64.replace(/\s/g, ""), "base64").toString("utf8"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True iff the repo is a rollout target (content signal, tooling/templates excluded).
+ * @param {string} repoName bare name (no owner)
+ * @returns {boolean}
+ */
+export function isContentTarget(repoName) {
+  if (EXCLUDED_REPOS.has(repoName)) return false;
+  return hasTutorialsDir(repoName) || hasOrbReference(repoName);
 }
 
 /**
@@ -79,9 +109,10 @@ export async function listTargetRepos({ dryRun = false, only = [] } = {}) {
       const repoName = repo.replace("sap-tutorials/", "");
       if (only.length > 0 && !only.includes(repoName) && !only.includes(repo)) continue;
 
-      // Target = tutorial content repo (has a `tutorials/` dir), excluding tooling/templates.
-      // Independent of CircleCI, which is being removed and is not a reliable signal.
-      if (hasTutorialsDir(repoName)) {
+      // Target = tutorial content repo: has a `tutorials/` dir OR references the
+      // tutorial-checker orb (union), excluding tooling/templates. CircleCI alone
+      // is not relied on (being removed), but still counts a repo in.
+      if (isContentTarget(repoName)) {
         targets.push(repo);
       }
     }
