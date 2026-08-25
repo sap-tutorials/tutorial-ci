@@ -4,12 +4,43 @@ import path from "node:path";
 
 /**
  * Returns true iff the given CircleCI config text references the saptutorials/tutorial-checker orb.
+ * Retained for reference/tests; enumeration now keys off tutorial CONTENT (a `tutorials/`
+ * directory), because CircleCI is being removed and cannot be relied on as the signal.
  * @param {string|null} circleCiConfigText
  * @returns {boolean}
  */
 export function isTargetRepo(circleCiConfigText) {
   if (!circleCiConfigText) return false;
   return circleCiConfigText.includes("saptutorials/tutorial-checker");
+}
+
+/**
+ * Tooling / template / infra repos that are NOT tutorial content and must never
+ * receive the PR-checks callers via rollout (templates are seeded separately).
+ */
+export const EXCLUDED_REPOS = new Set([
+  "tutorial-ci",
+  "tutorial-checker",
+  "tutorial-checker-orb",
+  "tutorial-actions",
+  "repository-template",
+  "tutorial-repo-template",
+  "tutorial-repo-Contribution-template",
+  ".github",
+  "sapcommunity",
+]);
+
+/**
+ * A repo is a tutorial content repo (rollout target) iff it has a top-level
+ * `tutorials/` directory and is not in the tooling/template exclude set.
+ * @param {string} repoName bare name (no owner)
+ * @returns {boolean}
+ */
+export function hasTutorialsDir(repoName) {
+  if (EXCLUDED_REPOS.has(repoName)) return false;
+  const res = ghApi(`repos/sap-tutorials/${repoName}/contents/tutorials`, ["--jq", "type"]);
+  // A directory listing returns a JSON array; `--jq type` prints "array".
+  return res !== null && res.trim() === "array";
 }
 
 /**
@@ -36,7 +67,7 @@ export async function listTargetRepos({ dryRun = false, only = [] } = {}) {
 
   while (true) {
     const result = ghApi(
-      `orgs/sap-tutorials/repos?per_page=100&page=${page}&type=internal`,
+      `orgs/sap-tutorials/repos?per_page=100&page=${page}&type=all`,
       ["--jq", ".[].full_name"]
     );
     if (!result) break;
@@ -48,25 +79,9 @@ export async function listTargetRepos({ dryRun = false, only = [] } = {}) {
       const repoName = repo.replace("sap-tutorials/", "");
       if (only.length > 0 && !only.includes(repoName) && !only.includes(repo)) continue;
 
-      // Fetch .circleci/config.yml content (base64-encoded by GitHub API)
-      const contentResult = ghApi(
-        `repos/${repo}/contents/.circleci/config.yml`,
-        ["--jq", ".content"]
-      );
-
-      let configText = null;
-      if (contentResult) {
-        const b64 = contentResult.trim();
-        if (b64 && b64 !== "null") {
-          try {
-            configText = Buffer.from(b64.replace(/\s/g, ""), "base64").toString("utf8");
-          } catch {
-            configText = null;
-          }
-        }
-      }
-
-      if (isTargetRepo(configText)) {
+      // Target = tutorial content repo (has a `tutorials/` dir), excluding tooling/templates.
+      // Independent of CircleCI, which is being removed and is not a reliable signal.
+      if (hasTutorialsDir(repoName)) {
         targets.push(repo);
       }
     }
@@ -88,7 +103,7 @@ if (path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const targets = await listTargetRepos({ dryRun, only });
 
   if (dryRun) {
-    console.log("Dry-run mode — target repos that reference saptutorials/tutorial-checker:");
+    console.log("Dry-run mode — tutorial content repos (have a tutorials/ directory), excluding tooling/templates:");
     targets.forEach((r) => console.log(`  ${r}`));
     console.log(`\nTotal: ${targets.length} repo(s)`);
   } else {
