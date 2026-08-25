@@ -14,22 +14,23 @@
 function checkOptions(ctx) {
   const findings = [];
   const begins = [];
-  let endCount = 0;
+  const ends = [];
 
   for (let i = 0; i < ctx.lines.length; i++) {
     const line = ctx.lines[i];
     const lineNum = i + 1;
 
-    // Match [OPTION BEGIN [...]] — capture everything inside the outer brackets
-    const beginMatch = line.match(/^\[OPTION BEGIN(\s*\[([^\]]*)\])?\]/);
+    // Match [OPTION BEGIN [TabName]], [OPTION BEGIN []], or [OPTION BEGIN ]
+    // The bracket group is fully optional; trailing space before ] is tolerated.
+    const beginMatch = line.match(/^\[OPTION BEGIN(?:\s*\[([^\]]*)\])?\s*\]/);
     if (beginMatch) {
-      const tabName = beginMatch[2]; // contents inside inner [...]
+      const tabName = beginMatch[1]; // undefined when no [...] present
       begins.push({ lineNum, tabName: tabName === undefined ? null : tabName });
       continue;
     }
 
     if (/^\[OPTION END\]/.test(line)) {
-      endCount++;
+      ends.push(lineNum);
     }
   }
 
@@ -46,14 +47,20 @@ function checkOptions(ctx) {
   }
 
   // Check balance
-  if (begins.length !== endCount) {
-    // Find the line of the first unmatched BEGIN (or first line as fallback)
-    const unmatchedLine = begins[endCount] ? begins[endCount].lineNum : (begins[0] ? begins[0].lineNum : 1);
+  if (begins.length !== ends.length) {
+    let unmatchedLine;
+    if (begins.length > ends.length) {
+      // More BEGINs than ENDs — report first unmatched BEGIN
+      unmatchedLine = begins[ends.length] ? begins[ends.length].lineNum : begins[0].lineNum;
+    } else {
+      // More ENDs than BEGINs — report first stray END
+      unmatchedLine = ends[begins.length] !== undefined ? ends[begins.length] : ends[0];
+    }
     findings.push({
       line: unmatchedLine,
       severity: "warning",
       rule: "option-unbalanced",
-      message: `[OPTION BEGIN] count (${begins.length}) does not match [OPTION END] count (${endCount})`,
+      message: `[OPTION BEGIN] count (${begins.length}) does not match [OPTION END] count (${ends.length})`,
     });
   }
 
