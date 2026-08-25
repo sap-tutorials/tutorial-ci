@@ -25,6 +25,20 @@ jobs:
         with:
           fetch-depth: 0
 
+      # ── 1b. Sparse-checkout tutorial-ci config + scripts into _ci/ ───────────
+      #    Uses path:_ci so the consumer repo at workspace root is untouched.
+      #    ref:v1 pins to the stable release tag — same repo that hosts this file.
+      - name: Checkout tutorial-ci config + scripts
+        uses: actions/checkout@v4
+        with:
+          repository: sap-tutorials/tutorial-ci
+          ref: v1
+          sparse-checkout: |
+            config
+            scripts
+          sparse-checkout-cone-mode: false
+          path: _ci
+
       # ── 2. Compute list of changed markdown files ──────────────────────────
       - name: Compute changed markdown
         run: |
@@ -54,7 +68,7 @@ jobs:
       #    Uses markdownlint-cli2-formatter-json so ml.json is a true JSON array
       #    of {fileName, lineNumber, ruleNames, ruleDescription} objects that the
       #    normaliser consumes directly — no fragile text parsing.
-      #    Rules are read from config/markdownlint.yaml (single source of truth);
+      #    Rules are read from _ci/config/markdownlint.yaml (single source of truth);
       #    the formatter is appended at runtime — no hand-maintained duplicate
       #    ruleset. --config accepts full cli2 JSONC configs.
       - name: Run markdownlint-cli2
@@ -62,10 +76,10 @@ jobs:
         continue-on-error: true
         run: |
           npm install --global markdownlint-cli2 markdownlint-cli2-formatter-json 2>/dev/null
-          # Build cli2 JSONC from config/markdownlint.yaml (single source of truth)
+          # Build cli2 JSONC from _ci/config/markdownlint.yaml (single source of truth)
           # then append the JSON formatter — no hand-maintained inline copy.
           node -e "
-            const src = require('fs').readFileSync('config/markdownlint.yaml', 'utf8');
+            const src = require('fs').readFileSync('_ci/config/markdownlint.yaml', 'utf8');
             const rules = {};
             for (const line of src.split('\n')) {
               const m = line.match(/^(\w+):\s*(true|false)/);
@@ -95,7 +109,7 @@ jobs:
             --no-git \
             --report-format json \
             --report-path gl.json \
-            -c config/gitleaks.toml \
+            -c _ci/config/gitleaks.toml \
             --source . \
             || true
 
@@ -113,10 +127,11 @@ jobs:
         continue-on-error: true
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --config config/lychee.toml --format json --output ly-raw.json ${{ steps.lychee-files.outputs.files }}
+          args: --config _ci/config/lychee.toml --format json --output ly-raw.json ${{ steps.lychee-files.outputs.files }}
 
       - name: Normalize lychee output to fail_map shape
         if: steps.md-changed.outputs.has_md == 'true'
+        continue-on-error: true
         run: |
           node -e "
             const fs = require('fs');
@@ -159,15 +174,17 @@ jobs:
       #    prints a single findings array to stdout.
       - name: Normalize findings
         if: always()
+        continue-on-error: true
         run: |
-          node scripts/normalize-findings.js ml.json gl.json ly.json content.json > findings.json
+          node _ci/scripts/normalize-findings.js ml.json gl.json ly.json content.json > findings.json
 
       # ── 8. Emit GitHub workflow annotations ────────────────────────────────
       #    Reads findings.json and prints ::warning:: / ::notice:: commands.
       #    GitHub Actions picks these up and attaches them to the PR diff.
       - name: Emit annotations
         if: always()
-        run: node scripts/emit-annotations.js
+        continue-on-error: true
+        run: node _ci/scripts/emit-annotations.js
 
       # ── 9. Write PR metadata for the comment-poster workflow ───────────────
       - name: Write pr-meta.json
