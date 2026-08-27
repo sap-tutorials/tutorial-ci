@@ -1,7 +1,7 @@
 import { test, expect } from "vitest";
 import { runChecks } from "../index.js";
 import { tagRules } from "../rules/tags.js";
-import { loadTaxonomy, _resetTaxonomyCacheForTests } from "../lib/taxonomy.js";
+import { loadTaxonomy, _resetTaxonomyCacheForTests, TAXONOMY_URL, resolveTaxonomyUrl } from "../lib/taxonomy.js";
 
 // Run only the tag rules with an injected taxonomy set (mirrors frontmatter.test.js,
 // which threads an explicit rules array into runChecks).
@@ -100,4 +100,45 @@ test("loadTaxonomy fails open (null) when fetch throws", async () => {
     throw new Error("network down");
   };
   expect(await loadTaxonomy({ fetchImpl, url: "http://x" })).toBeNull();
+});
+
+// ---- feed URL source: PROD default + env-var override ----
+
+test("TAXONOMY_URL defaults to the live PROD /build/tags feed", () => {
+  expect(TAXONOMY_URL).toBe(
+    "https://tutorial-system-prod-tutorials-srv.cfapps.eu10-005.hana.ondemand.com/build/tags"
+  );
+});
+
+test("resolveTaxonomyUrl uses the PROD default when the env var is unset", () => {
+  const prev = process.env.TUTORIAL_TAGS_FEED_URL;
+  delete process.env.TUTORIAL_TAGS_FEED_URL;
+  try {
+    expect(resolveTaxonomyUrl()).toBe(TAXONOMY_URL);
+  } finally {
+    if (prev !== undefined) process.env.TUTORIAL_TAGS_FEED_URL = prev;
+  }
+});
+
+test("TUTORIAL_TAGS_FEED_URL env var overrides the default feed URL", async () => {
+  const prev = process.env.TUTORIAL_TAGS_FEED_URL;
+  process.env.TUTORIAL_TAGS_FEED_URL = "http://override.example/build/tags";
+  try {
+    expect(resolveTaxonomyUrl()).toBe("http://override.example/build/tags");
+
+    // loadTaxonomy() with no explicit url should fetch the overridden URL.
+    _resetTaxonomyCacheForTests();
+    let fetchedUrl;
+    const fetchImpl = async (u) => {
+      fetchedUrl = u;
+      return okJson({ tags: ["a>b"], error: null });
+    };
+    const taxo = await loadTaxonomy({ fetchImpl });
+    expect(fetchedUrl).toBe("http://override.example/build/tags");
+    expect(taxo).toBeInstanceOf(Set);
+  } finally {
+    if (prev === undefined) delete process.env.TUTORIAL_TAGS_FEED_URL;
+    else process.env.TUTORIAL_TAGS_FEED_URL = prev;
+    _resetTaxonomyCacheForTests();
+  }
 });

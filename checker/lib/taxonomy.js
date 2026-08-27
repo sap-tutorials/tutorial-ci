@@ -1,21 +1,33 @@
 /**
  * Canonical tag taxonomy loader.
  *
- * The valid set of `category>value` tags is published by the tutorials-ims build
- * at hugo/data/tags.json (shape: { tags: ["category>value", ...], buildAt, error }).
+ * The valid set of `category>value` tags is served live by the tutorials-ims CAP
+ * backend at the PROD `/build/tags` feed (shape: { tags: ["category>value", ...],
+ * buildAt, error }). PROD srv is public/anonymous, so no auth is needed. This
+ * reflects the current PROD taxonomy (~10K tags) — the full canonical set, not a
+ * subset — and never goes stale, unlike a committed data file.
+ *
+ * The URL defaults to the PROD feed and is overridable via the TUTORIAL_TAGS_FEED_URL
+ * env var (no code change needed to repoint it).
  *
  * loadTaxonomy() fetches it ONCE per process (cached) and returns a Set of valid
  * tag strings, or null. It is FAIL-OPEN by design: any failure — network error,
  * non-200 response, unparseable/empty body, a non-null `error` field, or an empty
  * `tags` array — resolves to null. The unknown-tag rule treats null as "skip the
- * check entirely", so the checker is a silent no-op until the feed exists.
+ * check entirely". `/build/tags` currently 404s in PROD (the feed has not been
+ * PROD-deployed yet), so the checker stays a silent no-op until that deploy lands.
  *
  * Tags are lowercase-canonical (e.g. "software-product>sap-hana"); matching against
  * this set is case-sensitive to mirror the taxonomy's own casing.
  */
 
 export const TAXONOMY_URL =
-  "https://raw.githubusercontent.com/sap-tutorials/tutorials-ims/DEV/hugo/data/tags.json";
+  "https://tutorial-system-prod-tutorials-srv.cfapps.eu10-005.hana.ondemand.com/build/tags";
+
+/** Resolve the feed URL: TUTORIAL_TAGS_FEED_URL env override, else the PROD default. */
+export function resolveTaxonomyUrl() {
+  return process.env.TUTORIAL_TAGS_FEED_URL || TAXONOMY_URL;
+}
 
 // undefined = not yet loaded; Set = valid tags; null = unavailable (fail-open)
 let _cache;
@@ -45,7 +57,7 @@ async function fetchTaxonomy(fetchImpl, url) {
  * @param {{ fetchImpl?: typeof fetch, url?: string }} [opts]
  * @returns {Promise<Set<string>|null>} valid tag set, or null when unavailable
  */
-export async function loadTaxonomy({ fetchImpl, url = TAXONOMY_URL } = {}) {
+export async function loadTaxonomy({ fetchImpl, url = resolveTaxonomyUrl() } = {}) {
   if (_cache !== undefined) return _cache;
   _cache = await fetchTaxonomy(fetchImpl ?? globalThis.fetch, url);
   return _cache;

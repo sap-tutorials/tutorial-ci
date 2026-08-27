@@ -8,7 +8,7 @@
  * taxonomy threaded onto ctx.taxonomy by the harness (checker/index.js, via
  * lib/taxonomy.js). FAIL-OPEN: when ctx.taxonomy is unavailable (null / not a Set /
  * empty) the rule emits nothing — this is the case whenever the tutorials-ims
- * tags.json feed hasn't been published yet or the fetch failed. Never blocks merge.
+ * PROD /build/tags feed hasn't been deployed yet or the fetch failed. Never blocks merge.
  */
 
 // tutorial>beginner|intermediate|advanced is the experience/level tag; it is not
