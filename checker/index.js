@@ -7,6 +7,11 @@ import { allRules } from "./rules/index.js";
  * Splits frontmatter + body using gray-matter, precomputes:
  *   - lines: markdown.split("\n")
  *   - frontmatterEndLine: 0-based index of the closing "---" line (or 0 if no frontmatter)
+ *   - frontmatterRaw: the RAW text between the "---" fences (or "" when absent). This is
+ *       the un-parsed YAML source; escape-aware rules (e.g. frontmatter-unknown-tag) use
+ *       it to re-split values that gray-matter/js-yaml mangle — notably the SAP `\,`
+ *       escaped-comma convention inside a flow-sequence `tags: [ … ]`, which js-yaml
+ *       splits on the escaped comma AND drops the backslash.
  */
 export function parseContext(markdown, filename) {
   const lines = markdown.split("\n");
@@ -27,6 +32,10 @@ export function parseContext(markdown, filename) {
     }
   }
 
+  // Raw YAML source between the fences (exclusive of both "---" lines).
+  const frontmatterRaw =
+    frontmatterEndLine > 0 ? lines.slice(1, frontmatterEndLine).join("\n") : "";
+
   return {
     markdown,
     filename,
@@ -34,6 +43,7 @@ export function parseContext(markdown, filename) {
     frontmatter: parsed.data ?? {},
     body: parsed.content ?? "",
     frontmatterEndLine,
+    frontmatterRaw,
   };
 }
 
