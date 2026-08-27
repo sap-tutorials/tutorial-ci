@@ -60,6 +60,61 @@ test("FAIL-OPEN by default: allRules with no taxonomy threaded emits no unknown-
   expect(runChecks(doc, "tutorials/x/x.md").map((f) => f.rule)).not.toContain("frontmatter-unknown-tag");
 });
 
+// ---- value-slug matching (mirrors the parser's split('>').pop(), not category>value) ----
+
+const noUnknown = (findings) =>
+  findings.filter((f) => f.rule === "frontmatter-unknown-tag");
+
+test("legacy category prefix passes when the VALUE exists under another category", () => {
+  // products>sap-hana is legacy; the product exists as software-product>sap-hana.
+  const taxo = new Set(["software-product>sap-hana", "topic>cloud"]);
+  const doc = md(["products>sap-hana", "tutorial>beginner"], "products>sap-hana");
+  expect(noUnknown(check(doc, taxo))).toEqual([]);
+});
+
+test("comma/escape display-form normalizes to the feed's slug-form (kyma-runtime)", () => {
+  // frontmatter `software-product>sap-btp\, kyma-runtime` vs feed `…sap-btp--kyma-runtime`.
+  // Single-quoted so the comma does not split the value (flow-seq would split at `,`).
+  const taxo = new Set(["software-product>sap-btp--kyma-runtime"]);
+  const doc =
+    `---\ntime: 5\nauthor_name: A\nauthor_profile: https://github.com/a\n` +
+    `primary_tag: 'software-product>sap-btp\\, kyma-runtime'\n---\n# X\n`;
+  expect(noUnknown(check(doc, taxo))).toEqual([]);
+});
+
+test("escaped comma display-form passes against the double-dash feed slug (hana-database)", () => {
+  const taxo = new Set(["software-product>sap-hana-cloud--sap-hana-database"]);
+  const doc =
+    `---\ntime: 5\nauthor_name: A\nauthor_profile: https://github.com/a\n` +
+    `primary_tag: 'sap-hana-cloud\\,-sap-hana-database'\n---\n# X\n`;
+  expect(noUnknown(check(doc, taxo))).toEqual([]);
+});
+
+test("a genuinely-unknown value still emits a NOTICE naming the original tag", () => {
+  const taxo = new Set(["software-product>sap-hana", "topic>cloud"]);
+  const doc = md(["topic>sap-api-business-hub", "tutorial>beginner"], "software-product>sap-hana");
+  const findings = noUnknown(check(doc, taxo));
+  expect(findings.length).toBe(1);
+  expect(findings[0].severity).toBe("notice");
+  expect(findings[0].message).toMatch(/topic>sap-api-business-hub/);
+});
+
+test("a malformed tag with no `>` (uses `:`) still emits a NOTICE", () => {
+  const taxo = new Set(["software-product>sap-hana", "topic>cloud"]);
+  // `tutorial:how-to` has no `>`, so the whole string is the value; it won't match.
+  const doc = md(["software-product>sap-hana"], "tutorial:how-to");
+  const findings = noUnknown(check(doc, taxo));
+  expect(findings.length).toBe(1);
+  expect(findings[0].message).toMatch(/tutorial:how-to/);
+});
+
+test("value that exists under a different category still passes (value-only match by design)", () => {
+  // topic>sql: value `sql` may exist elsewhere; value-only matching accepts it.
+  const taxo = new Set(["software-product>sql", "topic>cloud"]);
+  const doc = md(["topic>sql"], "topic>sql");
+  expect(noUnknown(check(doc, taxo))).toEqual([]);
+});
+
 // ---- loadTaxonomy() fail-open unit tests (mocked fetch) ----
 
 const okJson = (body) => ({
