@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { runChecks } from "./index.js";
+import { loadTaxonomy } from "./lib/taxonomy.js";
 
 // Collect file paths: each argv may be a newline-delimited list (from the
 // composite action) or a single path (from direct CLI use / tests).
@@ -22,6 +23,9 @@ const args = process.argv.slice(2)
   .filter(Boolean);
 
 const allFindings = [];
+
+// Load the canonical tag taxonomy once for the whole run (fail-open → null).
+const taxonomy = await loadTaxonomy();
 
 for (const filePath of args) {
   let content;
@@ -40,7 +44,7 @@ for (const filePath of args) {
     repoRelative = filePath;
   }
 
-  const findings = runChecks(content, repoRelative);
+  const findings = runChecks(content, repoRelative, undefined, { taxonomy });
   allFindings.push(...findings);
 }
 

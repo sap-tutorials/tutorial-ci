@@ -38,14 +38,20 @@ export function parseContext(markdown, filename) {
 }
 
 /**
- * runChecks(markdown, filename, rules?) → Finding[]
+ * runChecks(markdown, filename, rules?, options?) → Finding[]
  *
  * Runs each rule function with the parsed context. Each rule returns
  * partial findings { line, severity, rule, message }; the harness stamps
  * category:"content" + file:filename onto every finding before returning.
+ *
+ * options.taxonomy (Set<string>|null) is threaded onto ctx.taxonomy for the
+ * taxonomy-aware rules (e.g. frontmatter-unknown-tag). It is loaded once per run
+ * by the caller (cli.js) via lib/taxonomy.js and is null when unavailable — rules
+ * fail open on a null/empty taxonomy.
  */
-export function runChecks(markdown, filename, rules = allRules) {
+export function runChecks(markdown, filename, rules = allRules, options = {}) {
   const ctx = parseContext(markdown, filename);
+  ctx.taxonomy = options.taxonomy ?? null;
   const findings = [];
   for (const rule of rules) {
     const partial = rule(ctx);
