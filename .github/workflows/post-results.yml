@@ -88,12 +88,53 @@ jobs:
           sparse-checkout-cone-mode: false
           path: _ci
 
-      # ── 5. Render the sticky comment body ────────────────────────────────────
+      # ── 5. Error-severity gate + assigned-team lookup (fail-open) ────────────
+      #    Only when a finding is ERROR severity do we look up the team(s)
+      #    assigned to the content repo and build @org/team mentions. Warnings
+      #    and notices post silently (no ping — avoid alerting teams on advisory
+      #    notices). The team lookup NEVER fails the job: any error (including
+      #    the App token lacking org "Members: read" — see PR body) degrades to
+      #    posting the comment with no mention.
+      #
+      #    PERMISSIONS NOTE: GET /repos/{owner}/{repo}/teams needs the App
+      #    installation to grant organization "Members: read". A repo-scoped
+      #    token without it typically yields 403/empty — handled here as
+      #    fail-open (empty mentions). See PR body "App permission prerequisite".
+      - name: Compute error gate and team mentions
+        id: mentions
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          OWNER: ${{ steps.meta.outputs.owner }}
+          REPO_NAME: ${{ steps.meta.outputs.repo_name }}
+        run: |
+          set -uo pipefail
+          has_error=$(jq -r 'if any(.[]; .severity == "error") then "true" else "false" end' findings.json)
+          echo "has_error=$has_error"
+          mentions=""
+          if [ "$has_error" = "true" ]; then
+            if teams_json=$(gh api "repos/${OWNER}/${REPO_NAME}/teams" --paginate 2>/tmp/teams_err); then
+              mentions=$(printf '%s' "$teams_json" \
+                | jq -r --arg org "$OWNER" '[.[]? | select(.slug != null and .slug != "") | "@" + $org + "/" + .slug] | unique | join(" ")')
+              if [ -z "$mentions" ]; then
+                echo "::notice::No teams assigned to ${OWNER}/${REPO_NAME}; posting without mention."
+              else
+                echo "Assigned team mentions: $mentions"
+              fi
+            else
+              echo "::warning::Could not read teams for ${OWNER}/${REPO_NAME} (fail-open, posting without mention). $(cat /tmp/teams_err 2>/dev/null || true)"
+            fi
+          fi
+          { echo "mentions<<GHEOF"; printf '%s\n' "$mentions"; echo "GHEOF"; } >> "$GITHUB_OUTPUT"
+
+      # ── 6. Render the sticky comment body ────────────────────────────────────
       #    Dynamic import (await import()) loads the ESM renderComment export
       #    correctly from a node - (CJS stdin eval) entry point.
       #    _ci/package.json declares "type":"module" so Node treats the import
-      #    target as ESM automatically.
+      #    target as ESM automatically. MENTIONS is empty on non-error runs, so
+      #    renderComment appends nothing (silent for warnings/notices).
       - name: Build comment.md
+        env:
+          MENTIONS: ${{ steps.mentions.outputs.mentions }}
         run: |
           node - <<'NODESCRIPT'
           (async () => {
@@ -101,11 +142,12 @@ jobs:
             const { renderComment } = await import('./_ci/scripts/normalize-findings.js');
             const findings = JSON.parse(fs.readFileSync('findings.json', 'utf8'));
             const meta    = JSON.parse(fs.readFileSync('pr-meta.json',   'utf8'));
-            fs.writeFileSync('comment.md', renderComment(findings, { sha: meta.head_sha }));
+            const mentions = (process.env.MENTIONS || '').trim().split(/\s+/).filter(Boolean);
+            fs.writeFileSync('comment.md', renderComment(findings, { sha: meta.head_sha, mentions }));
           })().catch(e => { console.error(e); process.exit(1); });
           NODESCRIPT
 
-      # ── 6. Post or update the sticky comment on the source PR ────────────────
+      # ── 7. Post or update the sticky comment on the source PR ────────────────
       #    marocchino/sticky-pull-request-comment rewrites the single comment
       #    keyed on `header: tutorial-ci` — repeated pushes update rather than
       #    accumulate duplicates.

@@ -76,14 +76,59 @@ export function renderAnnotations(findings) {
 }
 
 /**
+ * True when at least one finding is ERROR severity. Drives whether the
+ * post-results workflow pings the content repo's assigned team(s). Warnings
+ * and notices never trigger a mention (avoid alert fatigue).
+ * @param {Finding[]} findings
+ * @returns {boolean}
+ */
+export function hasErrorFinding(findings = []) {
+  return Array.isArray(findings) && findings.some((f) => f && f.severity === "error");
+}
+
+/**
+ * Build `@<org>/<team-slug>` mention strings from the GitHub
+ * "List repository teams" API response (GET /repos/{owner}/{repo}/teams).
+ *
+ * Edge cases (all handled here, never throw):
+ *   - zero teams / null / non-array  → [] (caller posts with no mention)
+ *   - multiple teams                 → one mention each
+ *   - entries missing a slug         → skipped
+ *   - duplicate slugs                → de-duplicated, order preserved
+ *
+ * @param {Array<{ slug?: string }>} teams  raw API array
+ * @param {string} org                       owner/org login (mention prefix)
+ * @returns {string[]}
+ */
+export function buildTeamMentions(teams, org) {
+  if (!Array.isArray(teams) || !org) return [];
+  const seen = new Set();
+  const mentions = [];
+  for (const team of teams) {
+    const slug = team && typeof team.slug === "string" ? team.slug.trim() : "";
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    mentions.push(`@${org}/${slug}`);
+  }
+  return mentions;
+}
+
+/**
  * Render a sticky PR comment in markdown.
  * @param {Finding[]} findings
- * @param {{ sha: string }} opts
+ * @param {{ sha: string, mentions?: string[] }} opts
+ *   mentions — optional `@org/team` strings appended to ping the assigned
+ *   team(s). Only supply these when an ERROR-severity finding is present;
+ *   an empty/omitted list renders no mention (silent for warnings/notices).
  * @returns {string}
  */
-export function renderComment(findings, { sha }) {
+export function renderComment(findings, { sha, mentions = [] } = {}) {
   const marker = "<!-- tutorial-ci-findings -->";
   const footer = `_Checked ${sha} • notify-only, does not block merge_`;
+  const mentionLine =
+    Array.isArray(mentions) && mentions.length > 0
+      ? `\n\n⚠️ ${mentions.join(" ")} — error-severity issues were found in this PR; please review.`
+      : "";
 
   if (findings.length === 0) {
     return `${marker}\n✅ No issues found\n\n${footer}`;
@@ -106,7 +151,7 @@ export function renderComment(findings, { sha }) {
     })
     .join("\n\n");
 
-  return `${marker}\n${sections}\n\n${footer}`;
+  return `${marker}\n${sections}${mentionLine}\n\n${footer}`;
 }
 
 // CLI shim — only runs when invoked directly, not when imported as a module
