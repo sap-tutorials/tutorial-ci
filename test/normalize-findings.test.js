@@ -5,7 +5,11 @@ import {
   renderComment,
   hasErrorFinding,
   buildTeamMentions,
+  matchesAllowlist,
 } from "../scripts/normalize-findings.js";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
 
 describe("normalizeFindings", () => {
   test("maps markdownlint-cli2 jsonl to findings", () => {
@@ -82,34 +86,135 @@ describe("hasErrorFinding (severity gate)", () => {
   });
 });
 
-describe("buildTeamMentions (zero/one/many + edge cases)", () => {
+describe("buildTeamMentions (allowlist filtering + zero/one/many + edge cases)", () => {
   const org = "sap-tutorials";
+  // Broad allowlist used by the basic zero/one/many cases below.
+  const ANY = ["*"];
 
   test("ZERO teams → no mentions", () => {
-    expect(buildTeamMentions([], org)).toEqual([]);
+    expect(buildTeamMentions([], org, ANY)).toEqual([]);
   });
 
-  test("ONE team → single @org/slug mention", () => {
-    expect(buildTeamMentions([{ slug: "tutorial-editors" }], org)).toEqual(["@sap-tutorials/tutorial-editors"]);
+  test("ONE allowlisted team → single @org/slug mention", () => {
+    expect(buildTeamMentions([{ slug: "authors" }], org, ["authors"])).toEqual(["@sap-tutorials/authors"]);
   });
 
-  test("MULTIPLE teams → one mention each", () => {
-    expect(buildTeamMentions([{ slug: "a" }, { slug: "b" }], org)).toEqual([
-      "@sap-tutorials/a",
-      "@sap-tutorials/b",
+  test("MULTIPLE allowlisted teams → one mention each", () => {
+    expect(buildTeamMentions([{ slug: "authors" }, { slug: "publishers" }], org, ["authors", "publishers"])).toEqual([
+      "@sap-tutorials/authors",
+      "@sap-tutorials/publishers",
     ]);
   });
 
   test("de-duplicates repeated slugs and skips entries without a slug", () => {
-    expect(buildTeamMentions([{ slug: "a" }, { slug: "a" }, {}, { slug: "" }, { slug: "b" }], org)).toEqual([
+    expect(buildTeamMentions([{ slug: "a" }, { slug: "a" }, {}, { slug: "" }, { slug: "b" }], org, ANY)).toEqual([
       "@sap-tutorials/a",
       "@sap-tutorials/b",
     ]);
   });
 
   test("null/non-array input or missing org → [] (never throws)", () => {
-    expect(buildTeamMentions(null, org)).toEqual([]);
-    expect(buildTeamMentions(undefined, org)).toEqual([]);
-    expect(buildTeamMentions([{ slug: "a" }], "")).toEqual([]);
+    expect(buildTeamMentions(null, org, ANY)).toEqual([]);
+    expect(buildTeamMentions(undefined, org, ANY)).toEqual([]);
+    expect(buildTeamMentions([{ slug: "a" }], "", ANY)).toEqual([]);
+  });
+
+  // ── allowlist filtering with the REAL sap-tutorials/Tutorials team set ──────
+  const TUTORIALS_TEAMS = [
+    { slug: "authors" },
+    { slug: "admins" },
+    { slug: "publishers" },
+    { slug: "securityalerts" },
+    { slug: "monitor" },
+    { slug: "devrelations-production" },
+    { slug: "admin-write" },
+  ];
+
+  test("filters the real Tutorials team set to content owners only", () => {
+    const allowlist = ["authors", "publishers", "devrelations-contribution", "devrelations-production"];
+    const out = buildTeamMentions(TUTORIALS_TEAMS, org, allowlist);
+    // Survivors: authors, publishers, devrelations-production.
+    expect(out).toEqual([
+      "@sap-tutorials/authors",
+      "@sap-tutorials/publishers",
+      "@sap-tutorials/devrelations-production",
+    ]);
+    // Wrong-audience teams are dropped.
+    expect(out).not.toContain("@sap-tutorials/securityalerts");
+    expect(out).not.toContain("@sap-tutorials/monitor");
+    expect(out).not.toContain("@sap-tutorials/admins");
+    expect(out).not.toContain("@sap-tutorials/admin-write");
+  });
+
+  test("glob `devrelations-*` matches BOTH contribution and production teams", () => {
+    const teams = [{ slug: "devrelations-backend" }, { slug: "devrelations-contribution" }, { slug: "devrelations-production" }];
+    const out = buildTeamMentions(teams, org, ["devrelations-*"]);
+    expect(out).toEqual([
+      "@sap-tutorials/devrelations-backend",
+      "@sap-tutorials/devrelations-contribution",
+      "@sap-tutorials/devrelations-production",
+    ]);
+  });
+
+  test("EMPTY or MISSING allowlist → mention NONE (fail-safe)", () => {
+    expect(buildTeamMentions(TUTORIALS_TEAMS, org, [])).toEqual([]);
+    expect(buildTeamMentions(TUTORIALS_TEAMS, org)).toEqual([]); // allowlist omitted
+    expect(buildTeamMentions(TUTORIALS_TEAMS, org, null)).toEqual([]);
+    expect(buildTeamMentions(TUTORIALS_TEAMS, org, "authors")).toEqual([]); // non-array
+  });
+
+  test("a slug matching NO pattern is dropped (literal, no accidental substring)", () => {
+    // "author" pattern must NOT match "authors" (full-string anchored).
+    expect(buildTeamMentions([{ slug: "authors" }], org, ["author"])).toEqual([]);
+  });
+});
+
+describe("matchesAllowlist (tiny glob matcher)", () => {
+  test("exact literal match", () => {
+    expect(matchesAllowlist("authors", ["authors"])).toBe(true);
+    expect(matchesAllowlist("authors", ["publishers"])).toBe(false);
+  });
+
+  test("`*` wildcard matches any run of characters", () => {
+    expect(matchesAllowlist("devrelations-contribution", ["devrelations-*"])).toBe(true);
+    expect(matchesAllowlist("devrelations-production", ["devrelations-*"])).toBe(true);
+    expect(matchesAllowlist("securityalerts", ["devrelations-*"])).toBe(false);
+    expect(matchesAllowlist("anything", ["*"])).toBe(true);
+  });
+
+  test("anchored full-string (no accidental substring/regex-meta match)", () => {
+    expect(matchesAllowlist("authors", ["author"])).toBe(false); // not a prefix match
+    expect(matchesAllowlist("a.b", ["a.b"])).toBe(true); // `.` is literal, not regex any-char
+    expect(matchesAllowlist("aXb", ["a.b"])).toBe(false); // `.` must NOT match X
+  });
+
+  test("empty/missing allowlist or slug → false (never throws)", () => {
+    expect(matchesAllowlist("authors", [])).toBe(false);
+    expect(matchesAllowlist("authors", null)).toBe(false);
+    expect(matchesAllowlist("", ["*"])).toBe(false);
+  });
+});
+
+describe("config/notify-teams.json (committed allowlist)", () => {
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const cfgPath = path.resolve(__dirname, "..", "config", "notify-teams.json");
+
+  test("is valid JSON with a string[] teamSlugAllowlist", () => {
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    expect(Array.isArray(cfg.teamSlugAllowlist)).toBe(true);
+    expect(cfg.teamSlugAllowlist.every((s) => typeof s === "string")).toBe(true);
+  });
+
+  test("default allowlist filters the real Tutorials set to authors+publishers+devrelations-production", () => {
+    const cfg = JSON.parse(readFileSync(cfgPath, "utf8"));
+    const tutorialsTeams = [
+      { slug: "authors" }, { slug: "admins" }, { slug: "publishers" }, { slug: "securityalerts" },
+      { slug: "monitor" }, { slug: "devrelations-production" }, { slug: "admin-write" },
+    ];
+    expect(buildTeamMentions(tutorialsTeams, "sap-tutorials", cfg.teamSlugAllowlist)).toEqual([
+      "@sap-tutorials/authors",
+      "@sap-tutorials/publishers",
+      "@sap-tutorials/devrelations-production",
+    ]);
   });
 });

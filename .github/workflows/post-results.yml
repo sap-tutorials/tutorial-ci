@@ -84,6 +84,7 @@ jobs:
           ref: v1
           sparse-checkout: |
             scripts/normalize-findings.js
+            config/notify-teams.json
             package.json
           sparse-checkout-cone-mode: false
           path: _ci
@@ -95,6 +96,14 @@ jobs:
       #    notices). The team lookup NEVER fails the job: any error (including
       #    the App token lacking org "Members: read" — see PR body) degrades to
       #    posting the comment with no mention.
+      #
+      #    ALLOWLIST FILTER: the raw team list is filtered to the configured
+      #    content-owner teams in config/notify-teams.json (glob-aware) via the
+      #    shared buildTeamMentions() helper — so glob semantics live in exactly
+      #    ONE place (JS, unit-tested) instead of being duplicated in jq. An
+      #    empty/missing allowlist mentions NO ONE (fail-safe). This is what
+      #    keeps a content-check failure from paging securityalerts / monitor /
+      #    admins on content-heavy repos like sap-tutorials/Tutorials.
       #
       #    PERMISSIONS NOTE: GET /repos/{owner}/{repo}/teams needs the App
       #    installation to grant organization "Members: read". A repo-scoped
@@ -113,12 +122,29 @@ jobs:
           mentions=""
           if [ "$has_error" = "true" ]; then
             if teams_json=$(gh api "repos/${OWNER}/${REPO_NAME}/teams" --paginate 2>/tmp/teams_err); then
-              mentions=$(printf '%s' "$teams_json" \
-                | jq -r --arg org "$OWNER" '[.[]? | select(.slug != null and .slug != "") | "@" + $org + "/" + .slug] | unique | join(" ")')
+              printf '%s' "$teams_json" > /tmp/teams.json
+              # Filter to the config/notify-teams.json allowlist (glob-aware)
+              # through the shared JS helper — single source of truth for the
+              # matching rules, exercised by test/normalize-findings.test.js.
+              mentions=$(OWNER="$OWNER" node - <<'NODESCRIPT'
+          (async () => {
+            const fs = require('fs');
+            const { buildTeamMentions } = await import('./_ci/scripts/normalize-findings.js');
+            let allowlist = [];
+            try {
+              const cfg = JSON.parse(fs.readFileSync('./_ci/config/notify-teams.json', 'utf8'));
+              if (Array.isArray(cfg.teamSlugAllowlist)) allowlist = cfg.teamSlugAllowlist;
+            } catch { /* missing/invalid config → empty allowlist → mention none */ }
+            let teams = [];
+            try { teams = JSON.parse(fs.readFileSync('/tmp/teams.json', 'utf8')); } catch { /* keep [] */ }
+            process.stdout.write(buildTeamMentions(teams, process.env.OWNER, allowlist).join(' '));
+          })().catch(() => process.exit(0)); // fail-open: never fail the job on a mention build error
+          NODESCRIPT
+          )
               if [ -z "$mentions" ]; then
-                echo "::notice::No teams assigned to ${OWNER}/${REPO_NAME}; posting without mention."
+                echo "::notice::No allowlisted content-owner teams for ${OWNER}/${REPO_NAME}; posting without mention."
               else
-                echo "Assigned team mentions: $mentions"
+                echo "Allowlisted team mentions: $mentions"
               fi
             else
               echo "::warning::Could not read teams for ${OWNER}/${REPO_NAME} (fail-open, posting without mention). $(cat /tmp/teams_err 2>/dev/null || true)"
