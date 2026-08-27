@@ -20,6 +20,8 @@
   },
   "homepage": "https://github.com/sap-tutorials/tutorial-ci#readme",
   "devDependencies": {
+    "@cspell/cspell-json-reporter": "10.1.1",
+    "cspell": "10.1.1",
     "markdownlint-cli2": "0.23.2",
     "markdownlint-cli2-formatter-json": "0.0.9",
     "vitest": "4.1.11"

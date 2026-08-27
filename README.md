@@ -9,6 +9,8 @@ sticky summary comment, and never block a merge.
 ## What it checks
 
 - **Markdown lint** (markdownlint-cli2)
+- **Spelling** (cspell, notice-only — uses a committed SAP-terminology dictionary in
+  `config/sap-dictionary.txt`)
 - **Links** (lychee, warn-only)
 - **Secrets** (gitleaks, with SAP-specific patterns)
 - **SAP content rules** (frontmatter/step/validation contract — added by the
@@ -84,7 +86,7 @@ gate — merges are never blocked.
 - `.github/workflows/tutorial-pr-checks.yml` — reusable check workflow (`workflow_call`)
 - `.github/workflows/post-results.yml` — trusted `workflow_run` comment poster (GitHub App token)
 - `.github/workflows/rollout.yml` — installs/updates the caller across content repos
-- `config/` — shared markdownlint / gitleaks / lychee configs
+- `config/` — shared markdownlint / cspell / gitleaks / lychee configs
 - `scripts/` — findings normalizer, repo enumeration
 - `checker/` — SAP content checker (composite action)
 - `caller-template/` — the two caller files (checks + comment) synced into each repo

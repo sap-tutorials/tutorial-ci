@@ -1,7 +1,7 @@
 # Reusable workflow — called by per-repo callers via:
 #   uses: sap-tutorials/tutorial-ci/.github/workflows/tutorial-pr-checks.yml@v1
 #
-# Runs notify-only PR content checks (markdownlint, gitleaks, lychee) over
+# Runs notify-only PR content checks (markdownlint, cspell, gitleaks, lychee) over
 # changed markdown, emits inline annotations, and uploads a normalised
 # findings artifact for the trusted post-results.yml comment poster.
 # Always exits 0 — never blocks merge.
@@ -96,6 +96,46 @@ jobs:
           # Rename to ml.json; fall back to empty array if formatter produced nothing
           mv markdownlint-cli2-results.json ml.json 2>/dev/null || echo '[]' > ml.json
 
+      # ── 5b. cspell spell check → sp.json (changed files only, notify-only) ───
+      #    Notice severity — advisory spelling, never blocks merge. Uses the
+      #    committed SAP-terminology dictionary at _ci/config/sap-dictionary.txt
+      #    (imported from the legacy tutorial-checker whitelist — no runtime fetch).
+      #    JSON reporter → sp-raw.json, then converted to the shaped array that
+      #    normalize-findings.js's cspell branch reads (repo-relative paths).
+      - name: Run cspell spell check
+        if: steps.md-changed.outputs.has_md == 'true'
+        continue-on-error: true
+        run: |
+          npm install --global cspell @cspell/cspell-json-reporter 2>/dev/null
+          # Single invocation (space-separated list, like lychee) so the JSON
+          # reporter emits exactly one JSON object to stdout — xargs batching
+          # would concatenate multiple objects into invalid JSON.
+          FILES=$(tr '\n' ' ' < changed.txt)
+          cspell lint \
+            --config _ci/config/cspell.json \
+            --no-progress \
+            --reporter @cspell/cspell-json-reporter \
+            $FILES > sp-raw.json 2>/dev/null || true
+          # Convert {issues:[{uri,row,text,suggestionsEx}]} → [{file,line,word,suggestions}]
+          # with repo-relative file paths (reporter emits absolute file:// URIs).
+          node -e "
+            const fs = require('fs');
+            const { fileURLToPath } = require('node:url');
+            const path = require('node:path');
+            let raw = {};
+            try { raw = JSON.parse(fs.readFileSync('sp-raw.json', 'utf8')); } catch {}
+            const issues = Array.isArray(raw.issues) ? raw.issues : [];
+            const shaped = issues.map((i) => {
+              let file = i.uri || '';
+              try { file = path.relative(process.cwd(), fileURLToPath(i.uri)).replace(/\\/g, '/'); } catch {}
+              const suggestions = Array.isArray(i.suggestionsEx)
+                ? i.suggestionsEx.map((s) => s && s.word).filter(Boolean)
+                : (Array.isArray(i.suggestions) ? i.suggestions : []);
+              return { file, line: i.row ?? 0, word: i.text, suggestions };
+            });
+            fs.writeFileSync('sp.json', JSON.stringify(shaped));
+          " || echo '[]' > sp.json
+
       # ── 6. gitleaks → gl.json (full-tree scan — correct security posture) ───
       #    Install pinned binary then run in no-git mode for a clean JSON report.
       - name: Install gitleaks
@@ -172,14 +212,14 @@ jobs:
           output: content.json
 
       # ── 7. Normalise tool outputs into unified findings.json ───────────────
-      #    The CLI shim in normalize-findings.js reads the four JSON files
+      #    The CLI shim in normalize-findings.js reads the five JSON files
       #    (falls back to empty arrays/object on missing/invalid JSON) and
       #    prints a single findings array to stdout.
       - name: Normalize findings
         if: always()
         continue-on-error: true
         run: |
-          node _ci/scripts/normalize-findings.js ml.json gl.json ly.json content.json > findings.json
+          node _ci/scripts/normalize-findings.js ml.json gl.json ly.json content.json sp.json > findings.json
 
       # ── 8. Emit GitHub workflow annotations ────────────────────────────────
       #    Reads findings.json and prints ::warning:: / ::notice:: commands.

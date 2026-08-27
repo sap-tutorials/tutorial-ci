@@ -8,10 +8,10 @@ import path from "node:path";
 
 /**
  * Normalize raw tool outputs into a unified Finding[].
- * @param {{ markdownlint: any[], gitleaks: any[], lychee: any }} inputs
+ * @param {{ markdownlint: any[], gitleaks: any[], lychee: any, content?: any[], cspell?: any[] }} inputs
  * @returns {Finding[]}
  */
-export function normalizeFindings({ markdownlint = [], gitleaks = [], lychee = {}, content = [] }) {
+export function normalizeFindings({ markdownlint = [], gitleaks = [], lychee = {}, content = [], cspell = [] }) {
   const findings = [];
 
   // markdownlint-cli2 JSON output: array of { fileName, lineNumber, ruleNames, ruleDescription, ... }
@@ -51,6 +51,21 @@ export function normalizeFindings({ markdownlint = [], gitleaks = [], lychee = {
         message: `${failure.url} — ${failure.status}`,
       });
     }
+  }
+
+  // cspell (shaped) output: array of { file, line, word, suggestions? }
+  // Notify-only at notice severity — spelling is advisory and never blocks merge.
+  for (const entry of cspell) {
+    const suggestions = Array.isArray(entry.suggestions) ? entry.suggestions.filter(Boolean) : [];
+    const hint = suggestions.length ? ` — did you mean ${suggestions.slice(0, 3).join(", ")}?` : "";
+    findings.push({
+      category: "spelling",
+      file: entry.file,
+      line: entry.line ?? 0,
+      severity: "notice",
+      rule: "unknown-word",
+      message: `Unknown word "${entry.word}"${hint}`,
+    });
   }
 
   // Pre-normalized content findings — pass through unchanged
@@ -199,7 +214,7 @@ export function renderComment(findings, { sha, mentions = [] } = {}) {
 
 // CLI shim — only runs when invoked directly, not when imported as a module
 if (path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [, , mlPath, glPath, lyPath, contentPath] = process.argv;
+  const [, , mlPath, glPath, lyPath, contentPath, spPath] = process.argv;
 
   const readJson = (p) => {
     try {
@@ -214,6 +229,7 @@ if (path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const gitleaks = readJson(glPath) ?? [];
   const lycheeRaw = readJson(lyPath) ?? {};
   const content = readJson(contentPath) ?? [];
+  const cspell = readJson(spPath) ?? [];
 
-  console.log(JSON.stringify(normalizeFindings({ markdownlint, gitleaks, lychee: lycheeRaw, content })));
+  console.log(JSON.stringify(normalizeFindings({ markdownlint, gitleaks, lychee: lycheeRaw, content, cspell })));
 }
