@@ -1,0 +1,6 @@
+{
+  "_comment": "TUNABLE ALLOWLIST of content-owner team slugs to @-mention on error-severity tutorial-ci findings. This is the single knob maintainers edit to control who gets pinged when a content check fails. JSON has no native comments, so this documentation lives in the reserved `_comment*` keys (ignored by consumers, which read only `teamSlugAllowlist`).",
+  "_comment_globs": "Each entry is matched against a team slug as a GLOB: `*` matches any run of characters, everything else is literal. e.g. `devrelations-*` matches BOTH `devrelations-contribution` and `devrelations-production`. Only teams whose slug matches at least one pattern are mentioned — this keeps a tutorial content-check failure from paging security/monitoring/admin teams that also happen to have repo access (e.g. securityalerts, monitor, admins, admin-write).",
+  "_comment_empty": "An EMPTY or MISSING `teamSlugAllowlist` mentions NO ONE (fail-safe: an unconfigured allowlist most naturally means 'no content owners are configured'). See scripts/normalize-findings.js buildTeamMentions().",
+  "teamSlugAllowlist": ["authors", "publishers", "devrelations-contribution", "devrelations-production"]
+}
