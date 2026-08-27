@@ -25,6 +25,27 @@ describe("normalizeFindings", () => {
     const out = normalizeFindings({ markdownlint: [], gitleaks: [], lychee: [], content });
     expect(out).toContainEqual(content[0]);
   });
+
+  test("maps cspell shaped issues to notice-level spelling findings", () => {
+    const cspell = [{ file: "d.md", line: 9, word: "resposne", suggestions: ["response"] }];
+    const out = normalizeFindings({ markdownlint: [], gitleaks: [], lychee: [], cspell });
+    expect(out[0]).toMatchObject({
+      category: "spelling",
+      file: "d.md",
+      line: 9,
+      severity: "notice",
+      rule: "unknown-word",
+      message: expect.stringContaining("resposne"),
+    });
+    expect(out[0].message).toContain("response");
+  });
+
+  test("cspell findings never carry a blocking severity (notify-only)", () => {
+    const cspell = [{ file: "e.md", line: 1, word: "wrng" }];
+    const out = normalizeFindings({ markdownlint: [], gitleaks: [], lychee: [], cspell });
+    // renderAnnotations only ever emits notice/warning — a spelling finding must be notice.
+    expect(out.every((f) => f.category !== "spelling" || f.severity === "notice")).toBe(true);
+  });
 });
 
 describe("renderAnnotations", () => {

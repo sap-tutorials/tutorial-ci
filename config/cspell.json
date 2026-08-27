@@ -1,0 +1,39 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "description": "Notify-only spell check for SAP tutorial markdown (tutorial-ci).",
+  "dictionaryDefinitions": [
+    {
+      "name": "sap-terminology",
+      "path": "./sap-dictionary.txt",
+      "description": "SAP product names + tutorial terminology imported from the legacy tutorial-checker whitelist"
+    }
+  ],
+  "dictionaries": [
+    "sap-terminology",
+    "en_US",
+    "softwareTerms",
+    "typescript",
+    "node",
+    "npm",
+    "html",
+    "css",
+    "bash",
+    "filetypes",
+    "companies",
+    "misc"
+  ],
+  "ignorePaths": [
+    "node_modules/**",
+    "**/*.min.*"
+  ],
+  "ignoreRegExpList": [
+    "Urls",
+    "Email",
+    "HexValues",
+    "/```[\\s\\S]*?```/g",
+    "/`[^`\\n]+`/g",
+    "/<[^>]+>/g",
+    "/\\]\\([^)]*\\)/g"
+  ]
+}

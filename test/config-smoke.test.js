@@ -26,6 +26,11 @@ const hasMarkdownlintCli2 = (() => {
   catch { return false; }
 })();
 
+const hasCspell = (() => {
+  try { execFileSync("cspell", ["--version"], { stdio: "ignore" }); return true; }
+  catch { return false; }
+})();
+
 // ---------------------------------------------------------------------------
 // gitleaks tests
 // ---------------------------------------------------------------------------
@@ -65,6 +70,37 @@ test.skipIf(!hasMarkdownlintCli2)("markdownlint-cli2 flags the bad-markdown fixt
 test.skipIf(!hasMarkdownlintCli2)("markdownlint-cli2 passes the clean fixture", () => {
   const r = run("markdownlint-cli2", [
     "--config", "config/markdownlint.yaml",
+    "test/fixtures/clean.md",
+  ]);
+  expect(r.code).toBe(0);
+});
+
+// ---------------------------------------------------------------------------
+// cspell tests (notify-only spell check — exits non-zero when issues found,
+// but the workflow runs it with continue-on-error so it never blocks merge)
+// ---------------------------------------------------------------------------
+
+test.skipIf(!hasCspell)("cspell flags the misspelled fixture but not SAP terms", () => {
+  const r = run("cspell", [
+    "lint",
+    "--config", "config/cspell.json",
+    "--no-progress",
+    "test/fixtures/misspelled.md",
+  ]);
+  expect(r.code).not.toBe(0); // exits non-zero when unknown words found
+  // The deliberate misspellings are reported …
+  expect(r.out).toContain("resposne");
+  expect(r.out).toContain("recieve");
+  // … while SAP terminology from the committed dictionary is NOT flagged.
+  expect(r.out).not.toContain("(SAPUI");
+  expect(r.out).not.toContain("(OData");
+});
+
+test.skipIf(!hasCspell)("cspell passes the clean fixture", () => {
+  const r = run("cspell", [
+    "lint",
+    "--config", "config/cspell.json",
+    "--no-progress",
     "test/fixtures/clean.md",
   ]);
   expect(r.code).toBe(0);
