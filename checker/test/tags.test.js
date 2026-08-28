@@ -1,6 +1,7 @@
 import { test, expect } from "vitest";
+import matter from "gray-matter";
 import { runChecks } from "../index.js";
-import { tagRules } from "../rules/tags.js";
+import { tagRules, parseTagsEscapeAware } from "../rules/tags.js";
 import { loadTaxonomy, _resetTaxonomyCacheForTests, TAXONOMY_URL, resolveTaxonomyUrl } from "../lib/taxonomy.js";
 
 // Run only the tag rules with an injected taxonomy set (mirrors frontmatter.test.js,
@@ -115,8 +116,107 @@ test("value that exists under a different category still passes (value-only matc
   expect(noUnknown(check(doc, taxo))).toEqual([]);
 });
 
-// ---- loadTaxonomy() fail-open unit tests (mocked fetch) ----
+// ---- SAP `\,` escaped-comma convention inside a flow-sequence tags: [ … ] ----
+//
+// gray-matter/js-yaml splits a flow sequence on the escaped comma AND drops the
+// backslash, so `X>sap-hana-cloud\,-data-lake` (ONE tag) parses to the phantom pair
+// ["X>sap-hana-cloud", "-data-lake"]. Extracting escape-aware from the RAW frontmatter
+// keeps it one tag; the existing `.replace(/\\/g,"")` + [^A-Za-z\d]→`-` normalization
+// then maps it to the feed's double-dash slug.
 
+// Sanity: prove gray-matter really mangles the flow sequence (end-to-end premise).
+test("PREMISE: gray-matter splits an escaped comma in tags[] into a phantom token", () => {
+  const raw =
+    `---\ntime: 5\n` +
+    `tags: [ tutorial>beginner, software-product-function>sap-hana-cloud\\,-data-lake, topic>cloud ]\n` +
+    `primary_tag: software-product-function>sap-hana-cloud\\,-data-lake\n---\n# X\n`;
+  const parsed = matter(raw);
+  // gray-matter/js-yaml SPLITS the flow sequence at the escaped comma, leaving a
+  // phantom `-data-lake` token as a standalone array entry (the bug). The backslash
+  // may be retained or dropped on the first fragment depending on the js-yaml build,
+  // so we assert on the stable phantom token, not on the exact first fragment.
+  expect(parsed.data.tags).toContain("-data-lake");
+  expect(parsed.data.tags.length).toBe(4); // 3 authored tags → 4 after the bad split
+  // The scalar primary_tag is unaffected: it stays ONE whole string (no split).
+  expect(typeof parsed.data.primary_tag).toBe("string");
+  expect(parsed.data.primary_tag).toMatch(/sap-hana-cloud.*data-lake/);
+});
+
+test("parseTagsEscapeAware keeps an escaped-comma tag whole (flow form)", () => {
+  const rawFm =
+    `time: 5\n` +
+    `tags: [ tutorial>beginner, software-product-function>sap-hana-cloud\\,-data-lake, topic>cloud ]`;
+  expect(parseTagsEscapeAware(rawFm)).toEqual([
+    "tutorial>beginner",
+    "software-product-function>sap-hana-cloud\\,-data-lake",
+    "topic>cloud",
+  ]);
+});
+
+test("parseTagsEscapeAware keeps an escaped-comma tag whole (block-list form)", () => {
+  const rawFm =
+    `time: 5\n` +
+    `tags:\n` +
+    `  - tutorial>beginner\n` +
+    `  - software-product-function>sap-hana-cloud\\,-data-lake\n` +
+    `  - topic>cloud\n` +
+    `primary_tag: topic>cloud`;
+  expect(parseTagsEscapeAware(rawFm)).toEqual([
+    "tutorial>beginner",
+    "software-product-function>sap-hana-cloud\\,-data-lake",
+    "topic>cloud",
+  ]);
+});
+
+test("parseTagsEscapeAware returns null when no tags: key is present (fall-back path)", () => {
+  expect(parseTagsEscapeAware("time: 5\nprimary_tag: topic>cloud")).toBeNull();
+  expect(parseTagsEscapeAware("")).toBeNull();
+  expect(parseTagsEscapeAware(undefined)).toBeNull();
+});
+
+test("escaped-comma tag in tags[] validates end-to-end (sap-hana-cloud\\,-data-lake)", () => {
+  // Raw doc that gray-matter WOULD split — parsed through the full runChecks pipeline.
+  const taxo = new Set([
+    "tutorial>beginner",
+    "software-product-function>sap-hana-cloud--data-lake",
+    "topic>cloud",
+  ]);
+  const doc =
+    `---\ntime: 5\nauthor_name: A\nauthor_profile: https://github.com/a\n` +
+    `tags: [ tutorial>beginner, software-product-function>sap-hana-cloud\\,-data-lake, topic>cloud ]\n` +
+    `primary_tag: topic>cloud\n---\n# X\n`;
+  expect(noUnknown(check(doc, taxo))).toEqual([]);
+});
+
+test("escaped-comma tag in tags[] validates end-to-end (sap-hana-cloud\\,-sap-hana-database)", () => {
+  const taxo = new Set([
+    "tutorial>beginner",
+    "software-product-function>sap-hana-cloud--sap-hana-database",
+  ]);
+  const doc =
+    `---\ntime: 5\nauthor_name: A\nauthor_profile: https://github.com/a\n` +
+    `tags: [ tutorial>beginner, software-product-function>sap-hana-cloud\\,-sap-hana-database ]\n` +
+    `primary_tag: tutorial>beginner\n---\n# X\n`;
+  expect(noUnknown(check(doc, taxo))).toEqual([]);
+});
+
+test("a genuinely-unknown tag alongside an escaped-comma tag STILL flags (only the bad one)", () => {
+  const taxo = new Set([
+    "tutorial>beginner",
+    "software-product-function>sap-hana-cloud--data-lake",
+  ]);
+  const doc =
+    `---\ntime: 5\nauthor_name: A\nauthor_profile: https://github.com/a\n` +
+    `tags: [ tutorial>beginner, software-product-function>sap-hana-cloud\\,-data-lake, topic>totally-bogus ]\n` +
+    `primary_tag: tutorial>beginner\n---\n# X\n`;
+  const findings = noUnknown(check(doc, taxo));
+  expect(findings.length).toBe(1);
+  expect(findings[0].message).toMatch(/topic>totally-bogus/);
+  // The escaped-comma tag must NOT be flagged, and no phantom `-data-lake` token either.
+  expect(findings.map((f) => f.message).join(" ")).not.toMatch(/data-lake/);
+});
+
+// ---- loadTaxonomy() fail-open unit tests (mocked fetch) ----
 const okJson = (body) => ({
   ok: true,
   status: 200,
