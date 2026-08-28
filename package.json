@@ -2,6 +2,7 @@
   "name": "tutorial-ci",
   "version": "1.0.0",
   "description": "Central org-maintained PR content checks for SAP tutorial repos",
+  "license": "Apache-2.0",
   "main": "index.js",
   "directories": {
     "test": "test"
