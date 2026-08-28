@@ -1,0 +1,10 @@
+version = 1
+SPDX-PackageName = "tutorial-ci"
+SPDX-PackageSupplier = "SAP SE <developers@sap.com>"
+SPDX-PackageDownloadLocation = "https://github.com/sap-tutorials/tutorial-ci"
+
+[[annotations]]
+path = "**"
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 SAP SE or an SAP affiliate company and tutorial-ci contributors"
+SPDX-License-Identifier = "Apache-2.0"

@@ -90,3 +90,7 @@ gate — merges are never blocked.
 - `scripts/` — findings normalizer, repo enumeration
 - `checker/` — SAP content checker (composite action)
 - `caller-template/` — the two caller files (checks + comment) synced into each repo
+
+## Licensing
+
+Copyright 2026 SAP SE or an SAP affiliate company and tutorial-ci contributors. Please see our [LICENSE](LICENSE) for copyright and license information. Detailed information including third-party components and their licensing/copyright information is available [via the REUSE tool](https://api.reuse.software/info/github.com/sap-tutorials/tutorial-ci).
