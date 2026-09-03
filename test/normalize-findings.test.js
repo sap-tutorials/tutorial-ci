@@ -4,6 +4,7 @@ import {
   renderAnnotations,
   renderComment,
   hasErrorFinding,
+  hasBlockingFinding,
   buildTeamMentions,
   matchesAllowlist,
 } from "../scripts/normalize-findings.js";
@@ -104,6 +105,34 @@ describe("hasErrorFinding (severity gate)", () => {
     expect(hasErrorFinding([])).toBe(false);
     expect(hasErrorFinding(undefined)).toBe(false);
     expect(hasErrorFinding(null)).toBe(false);
+  });
+});
+
+describe("blocking gate (structural errors depart from notify-only)", () => {
+  test("renderAnnotations emits an ::error:: command for error-severity findings", () => {
+    const s = renderAnnotations([{ category: "content", file: "t/x.md", line: 1, severity: "error", rule: "structure-zero-steps", message: "0 steps" }]);
+    expect(s).toContain("::error file=t/x.md,line=1,title=content/structure-zero-steps::0 steps");
+  });
+
+  test("hasBlockingFinding is true only for error severity", () => {
+    expect(hasBlockingFinding([{ severity: "error" }])).toBe(true);
+    expect(hasBlockingFinding([{ severity: "warning" }, { severity: "notice" }])).toBe(false);
+    expect(hasBlockingFinding([])).toBe(false);
+    expect(hasBlockingFinding(null)).toBe(false);
+  });
+
+  test("comment footer states blocking when an error finding is present, notify-only otherwise", () => {
+    const blocking = renderComment(
+      [{ category: "content", file: "x.md", line: 1, severity: "error", rule: "structure-no-frontmatter", message: "no fm" }],
+      { sha: "abc123" },
+    );
+    expect(blocking).toContain("structural errors block this PR check");
+
+    const advisory = renderComment(
+      [{ category: "secrets", file: "b.md", line: 5, severity: "warning", rule: "x", message: "y" }],
+      { sha: "abc123" },
+    );
+    expect(advisory).toContain("notify-only, does not block merge");
   });
 });
 

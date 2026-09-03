@@ -4,7 +4,11 @@ Central, org-maintained **PR content checks** for SAP tutorial repos in the
 `sap-tutorials` org. Replaces the legacy CircleCI `tutorial-checker` orb.
 
 Checks are **notify-only** — they surface issues as inline PR annotations and a
-sticky summary comment, and never block a merge.
+sticky summary comment, and never block a merge — **with one exception**:
+**structural errors** that make a tutorial unpublishable (no YAML frontmatter,
+or a file that parses to **0 steps**) fail the check so authors fix them at PR
+time instead of merging a tutorial the publish pipeline rejects and a full
+rebuild silently skips.
 
 ## What it checks
 
@@ -77,9 +81,13 @@ the hard way during the first pilot — change any and the pipeline silently deg
    `DavidAnson/markdownlint-cli2-action`, `marocchino/sticky-pull-request-comment`,
    `gitleaks`).
 
-Everything is **notify-only**: every workflow exits 0, findings are
-`warning`/`notice` annotations plus a sticky comment, and no check is a required
-gate — merges are never blocked.
+Nearly everything is **notify-only**: findings are `warning`/`notice` annotations
+plus a sticky comment. The **only** blocking findings are the two structural
+`error` rules in `checker/rules/structure.js` (`structure-no-frontmatter`,
+`structure-zero-steps`); the final gate step (`scripts/gate-blocking.js`) fails
+the PR check when either fires, and fails open on any infra error. To make a
+failed check actually prevent merge, mark **Tutorial PR Checks** as a required
+status check in branch protection — otherwise it shows as a loud red X.
 
 ## Layout
 
@@ -87,7 +95,7 @@ gate — merges are never blocked.
 - `.github/workflows/post-results.yml` — trusted `workflow_run` comment poster (GitHub App token)
 - `.github/workflows/rollout.yml` — installs/updates the caller across content repos
 - `config/` — shared markdownlint / cspell / gitleaks / lychee configs
-- `scripts/` — findings normalizer, repo enumeration
+- `scripts/` — findings normalizer, blocking gate, repo enumeration
 - `checker/` — SAP content checker (composite action)
 - `caller-template/` — the two caller files (checks + comment) synced into each repo
 
