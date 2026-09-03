@@ -4,7 +4,10 @@
 # Runs notify-only PR content checks (markdownlint, cspell, gitleaks, lychee) over
 # changed markdown, emits inline annotations, and uploads a normalised
 # findings artifact for the trusted post-results.yml comment poster.
-# Always exits 0 — never blocks merge.
+# Notify-only EXCEPT structural errors (checker/rules/structure.js: no
+# frontmatter / 0 parsed steps), which FAIL the check via the final gate
+# step so authors fix an unpublishable tutorial at PR time. All other
+# findings (lint, spelling, links, secrets, soft content rules) stay advisory.
 
 name: Tutorial PR Checks
 
@@ -287,7 +290,13 @@ jobs:
             findings.json
             pr-meta.json
 
-      # ── 11. Always succeed — notify-only, never blocks merge ───────────────
-      - name: Always succeed
+      # ── 11. Gate on blocking (structural) findings ─────────────────────────
+      #    tutorial-ci is notify-only EXCEPT for structural errors that make a
+      #    tutorial unpublishable (no frontmatter / 0 parsed steps). Those fail
+      #    the check so the author fixes them at PR time instead of shipping a
+      #    tutorial the publish guard rejects and a full rebuild silently skips.
+      #    Fails open: a missing/malformed findings.json exits 0. All other
+      #    findings remain advisory (warning/notice annotations + sticky comment).
+      - name: Gate on blocking findings
         if: always()
-        run: exit 0
+        run: node _ci/scripts/gate-blocking.js findings.json

@@ -4,9 +4,11 @@ import { validationRules } from "./validation.js";
 import { optionRules } from "./options.js";
 import { pathRules } from "./paths.js";
 import { tagRules } from "./tags.js";
+import { structureRules } from "./structure.js";
 
 // allRules is the flat array of all registered rule functions.
-// Tasks 3–7 append their rule arrays here.
+// structureRules carry the only `error`-severity (blocking) findings; the
+// workflow gate (scripts/gate-blocking.js) fails the PR check on those.
 export const allRules = [
   ...frontmatterRules,
   ...bodyRules,
@@ -14,4 +16,5 @@ export const allRules = [
   ...optionRules,
   ...pathRules,
   ...tagRules,
+  ...structureRules,
 ];

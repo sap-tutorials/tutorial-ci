@@ -84,7 +84,7 @@ export function normalizeFindings({ markdownlint = [], gitleaks = [], lychee = {
 export function renderAnnotations(findings) {
   return findings
     .map((f) => {
-      const level = f.severity === "notice" ? "notice" : "warning";
+      const level = f.severity === "notice" ? "notice" : f.severity === "error" ? "error" : "warning";
       return `::${level} file=${f.file},line=${f.line},title=${f.category}/${f.rule}::${f.message}`;
     })
     .join("\n");
@@ -98,6 +98,18 @@ export function renderAnnotations(findings) {
  * @returns {boolean}
  */
 export function hasErrorFinding(findings = []) {
+  return Array.isArray(findings) && findings.some((f) => f && f.severity === "error");
+}
+
+/**
+ * True when at least one finding is BLOCKING. tutorial-ci is notify-only
+ * EXCEPT for structural errors (no frontmatter / 0 parsed steps) emitted by
+ * checker/rules/structure.js at `error` severity. scripts/gate-blocking.js
+ * uses this to fail the PR check; everything else stays advisory.
+ * @param {Finding[]} findings
+ * @returns {boolean}
+ */
+export function hasBlockingFinding(findings = []) {
   return Array.isArray(findings) && findings.some((f) => f && f.severity === "error");
 }
 
@@ -182,7 +194,9 @@ export function buildTeamMentions(teams, org, allowlist = []) {
  */
 export function renderComment(findings, { sha, mentions = [] } = {}) {
   const marker = "<!-- tutorial-ci-findings -->";
-  const footer = `_Checked ${sha} • notify-only, does not block merge_`;
+  const footer = hasBlockingFinding(findings)
+    ? `_Checked ${sha} • ❌ structural errors block this PR check; other findings are notify-only_`
+    : `_Checked ${sha} • notify-only, does not block merge_`;
   const mentionLine =
     Array.isArray(mentions) && mentions.length > 0
       ? `\n\n⚠️ ${mentions.join(" ")} — error-severity issues were found in this PR; please review.`
