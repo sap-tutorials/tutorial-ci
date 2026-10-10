@@ -68,20 +68,36 @@ function bodyMissingPrerequisites(ctx) {
   return [];
 }
 
-/** body-no-steps: fewer than one ^## heading that is NOT You will learn / Prerequisites */
+/** body-no-steps: no step heading found.
+ *
+ * Step detection is parser-faithful (mirrors scripts/parsers + structure.js):
+ *   - `parser: v2`  → a step is an H3 heading (`### `). H2 headings are NOT steps.
+ *   - legacy (no/other parser) → a step is an H2 heading (`## `) that is not
+ *     the special `## You will learn` / `## Prerequisites` sections.
+ * Without this split the rule counted `## ` for every file and so false-fired
+ * on every v2 tutorial (whose steps are `### `). This is the heuristic twin of
+ * structure.js's blocking `structure-zero-steps`; it stays notify-only.
+ */
 function bodyNoSteps(ctx) {
   const fenced = buildFenceSet(ctx.lines);
   const bodyLines = ctx.body.split("\n");
+  const isV2 = ctx.frontmatter.parser === "v2";
   let stepCount = 0;
   for (let i = 0; i < bodyLines.length; i++) {
     const sourceIdx = ctx.frontmatterEndLine + 1 + i;
     if (fenced.has(sourceIdx)) continue;
-    if (/^## /.test(bodyLines[i]) && !SPECIAL_H2.test(bodyLines[i])) {
+    const line = bodyLines[i];
+    if (isV2) {
+      if (/^### /.test(line)) stepCount++;
+    } else if (/^## /.test(line) && !SPECIAL_H2.test(line)) {
       stepCount++;
     }
   }
   if (stepCount < 1) {
-    return [{ line: 1, severity: "warning", rule: "body-no-steps", message: "No step headings found (expected at least one '## ' heading that is not 'You will learn' or 'Prerequisites')" }];
+    const expected = isV2
+      ? "expected at least one '### ' (H3) step heading"
+      : "expected at least one '## ' heading that is not 'You will learn' or 'Prerequisites'";
+    return [{ line: 1, severity: "warning", rule: "body-no-steps", message: `No step headings found (${expected})` }];
   }
   return [];
 }
